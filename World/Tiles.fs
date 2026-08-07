@@ -328,9 +328,7 @@ module Tiles =
 
   /// Safe name lookup for data-driven code (tower/enemy defs, procedural gen).
   let tryByName (name: string) : TileInfo voption =
-    match byName.TryGetValue name with
-    | true, t -> ValueSome t
-    | _ -> ValueNone
+    Defli.FrozenDict.tryGetValue name byName
 
   // ── Semantically named tiles (curated in the generator) ──
   /// grass_full_a — atlas position (256, 320), 64x64.

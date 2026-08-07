@@ -79,6 +79,9 @@ line "// Source: assets/kenney_tower-defense-top-down/towerDefense_tilesheet.xml
 line "// ─────────────────────────────────────────────────────────────"
 line "namespace Defli.World"
 line ""
+line "open System.Collections.Frozen"
+line "open System.Collections.Generic"
+line ""
 line "module Tiles ="
 line ""
 linef "  [<Literal>]"
@@ -88,19 +91,29 @@ linef "  [<Literal>]"
 linef "  let TileSize = %d" (match subs with | [||] -> 0 | _ -> (let struct (_,_,_,w,_) = subs[0] in w))
 line ""
 linef "  /// All %d atlas tiles (name, position, size) baked at compile time." subs.Length
+line "  /// Canonical store: ordered and iterable. The name index is built from it."
 line "  let all: TileInfo[] = [|"
 for struct (name, x, y, w, h) in subs do
   linef "    { Name = %A; X = %d; Y = %d; Width = %d; Height = %d }" name x y w h
 line "  |]"
 line ""
-line "  let private byName (name: string) : TileInfo ="
-line "    all |> Array.find (fun t -> t.Name = name)"
+line "  /// O(1) name index over the baked dataset (built once at module init)."
+line "  let byName: FrozenDictionary<string, TileInfo> ="
+line "    all"
+line "    |> Seq.map (fun t -> KeyValuePair(t.Name, t))"
+line "    |> FrozenDictionary.ToFrozenDictionary"
+line ""
+line "  /// Safe name lookup for data-driven code (tower/enemy defs, procedural gen)."
+line "  let tryByName (name: string) : TileInfo voption ="
+line "    match byName.TryGetValue name with"
+line "    | true, t -> ValueSome t"
+line "    | _ -> ValueNone"
 line ""
 line "  // ── Semantically named tiles (curated in the generator) ──"
 for semantic, atlasName in named do
   let struct (_, x, y, w, h) = findTile atlasName
   linef "  /// %s — atlas position (%d, %d), %dx%d." atlasName x y w h
-  linef "  let %s = byName %A" semantic atlasName
+  linef "  let %s = byName[%A]" semantic atlasName
 line ""
 line "  // ── Groups (curated in the generator) ──"
 for group, members in groups do

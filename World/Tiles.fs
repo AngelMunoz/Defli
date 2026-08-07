@@ -5,6 +5,9 @@
 // ─────────────────────────────────────────────────────────────
 namespace Defli.World
 
+open System.Collections.Frozen
+open System.Collections.Generic
+
 module Tiles =
 
   [<Literal>]
@@ -14,6 +17,7 @@ module Tiles =
   let TileSize = 64
 
   /// All 299 atlas tiles (name, position, size) baked at compile time.
+  /// Canonical store: ordered and iterable. The name index is built from it.
   let all: TileInfo[] = [|
     { Name = "grass_patch_on_dirt_top_left"; X = 0; Y = 0; Width = 64; Height = 64 }
     { Name = "grass_patch_on_dirt_top"; X = 64; Y = 0; Width = 64; Height = 64 }
@@ -316,52 +320,61 @@ module Tiles =
     { Name = "flame_spread"; X = 1408; Y = 768; Width = 64; Height = 64 }
   |]
 
-  let private byName (name: string) : TileInfo =
-    all |> Array.find (fun t -> t.Name = name)
+  /// O(1) name index over the baked dataset (built once at module init).
+  let byName: FrozenDictionary<string, TileInfo> =
+    all
+    |> Seq.map (fun t -> KeyValuePair(t.Name, t))
+    |> FrozenDictionary.ToFrozenDictionary
+
+  /// Safe name lookup for data-driven code (tower/enemy defs, procedural gen).
+  let tryByName (name: string) : TileInfo voption =
+    match byName.TryGetValue name with
+    | true, t -> ValueSome t
+    | _ -> ValueNone
 
   // ── Semantically named tiles (curated in the generator) ──
   /// grass_full_a — atlas position (256, 320), 64x64.
-  let grassFullA = byName "grass_full_a"
+  let grassFullA = byName["grass_full_a"]
   /// grass_full_b — atlas position (576, 320), 64x64.
-  let grassFullB = byName "grass_full_b"
+  let grassFullB = byName["grass_full_b"]
   /// grass_full_c — atlas position (896, 320), 64x64.
-  let grassFullC = byName "grass_full_c"
+  let grassFullC = byName["grass_full_c"]
   /// dirt_full_a — atlas position (256, 128), 64x64.
-  let dirtFullA = byName "dirt_full_a"
+  let dirtFullA = byName["dirt_full_a"]
   /// dirt_full_b — atlas position (576, 128), 64x64.
-  let dirtFullB = byName "dirt_full_b"
+  let dirtFullB = byName["dirt_full_b"]
   /// dirt_full_c — atlas position (896, 128), 64x64.
-  let dirtFullC = byName "dirt_full_c"
+  let dirtFullC = byName["dirt_full_c"]
   /// path_vertical_dirt — atlas position (1024, 448), 64x64.
-  let pathVerticalDirt = byName "path_vertical_dirt"
+  let pathVerticalDirt = byName["path_vertical_dirt"]
   /// path_horizontal_dirt — atlas position (1024, 576), 64x64.
-  let pathHorizontalDirt = byName "path_horizontal_dirt"
+  let pathHorizontalDirt = byName["path_horizontal_dirt"]
   /// path_end_up_dirt — atlas position (1024, 384), 64x64.
-  let pathEndUpDirt = byName "path_end_up_dirt"
+  let pathEndUpDirt = byName["path_end_up_dirt"]
   /// path_end_left_dirt — atlas position (1024, 512), 64x64.
-  let pathEndLeftDirt = byName "path_end_left_dirt"
+  let pathEndLeftDirt = byName["path_end_left_dirt"]
   /// turret_mount_empty — atlas position (1216, 512), 64x64.
-  let turretMountEmpty = byName "turret_mount_empty"
+  let turretMountEmpty = byName["turret_mount_empty"]
   /// turret_base_a — atlas position (1216, 576), 64x64.
-  let turretBaseA = byName "turret_base_a"
+  let turretBaseA = byName["turret_base_a"]
   /// turret_green — atlas position (1216, 640), 64x64.
-  let turretGreen = byName "turret_green"
+  let turretGreen = byName["turret_green"]
   /// rocket_pod_single — atlas position (1408, 512), 64x64.
-  let rocketPodSingle = byName "rocket_pod_single"
+  let rocketPodSingle = byName["rocket_pod_single"]
   /// rocket_pod_dual — atlas position (1344, 512), 64x64.
-  let rocketPodDual = byName "rocket_pod_dual"
+  let rocketPodDual = byName["rocket_pod_dual"]
   /// rocket_small — atlas position (1344, 640), 64x64.
-  let rocketSmall = byName "rocket_small"
+  let rocketSmall = byName["rocket_small"]
   /// coin_gold — atlas position (1216, 704), 64x64.
-  let coinGold = byName "coin_gold"
+  let coinGold = byName["coin_gold"]
   /// effect_impact_burst — atlas position (1344, 0), 64x64.
-  let effectImpactBurst = byName "effect_impact_burst"
+  let effectImpactBurst = byName["effect_impact_burst"]
   /// effect_impact_ring — atlas position (1216, 0), 64x64.
-  let effectImpactRing = byName "effect_impact_ring"
+  let effectImpactRing = byName["effect_impact_ring"]
   /// effect_impact_debris — atlas position (1280, 0), 64x64.
-  let effectImpactDebris = byName "effect_impact_debris"
+  let effectImpactDebris = byName["effect_impact_debris"]
   /// crosshair — atlas position (1408, 0), 64x64.
-  let crosshair = byName "crosshair"
+  let crosshair = byName["crosshair"]
 
   // ── Groups (curated in the generator) ──
   let groundGrass = [| grassFullA; grassFullB; grassFullC |]

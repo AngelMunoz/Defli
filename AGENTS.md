@@ -52,6 +52,19 @@ call is a **compile-enforced** boundary: mutation phases run before it, readonly
 query phases after it. See [Scaling Mibo](https://angelmunoz.github.io/Mibo/scaling.html)
 for when each rung pays off — you can ship a lot of games at Level 2–3.
 
+## Code conventions (Extensions.fs)
+
+- **Dictionary access** — use `Dictionary.tryGetValue` / `ReadOnlyDict.tryGetValue` /
+  `FrozenDict.tryGetValue` (`Extensions.fs`): voption-returning, allocation-free
+  (byref out param). Never `match dict.TryGetValue key with | true, v ->` —
+  F# core's tuple form allocates.
+- **Dictionary iteration** — use `for KeyValueV(k, v) in dict do` (`Extensions.fs`):
+  struct tuple, no allocation. The F# core `KeyValue` pattern allocates a heap tuple.
+- **Option/ValueOption flattening** — prefer `ValueOption.*` combinators
+  (`map`/`bind`/`bind2`/`defaultValue`/`orElse`/…) over nested `match` chains
+  when the shape is a simple pipeline; keep `match` when branches need distinct
+  handling. All optional returns use `ValueOption` — never `Option`.
+
 ## Pointers by topic
 
 > **Read before you build.** These links are not suggestions. Before writing or

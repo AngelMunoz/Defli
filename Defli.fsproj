@@ -8,6 +8,7 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <Compile Include="Extensions.fs" />
     <Compile Include="World/Domain.fs" />
     <Compile Include="World/Tiles.fs" />
     <Compile Include="World/Systems/Map.fs" />

@@ -208,32 +208,76 @@ type EnemyEvent =
 - Writes go through the model's maps only — `CMap.addOrUpdate`, never `Post`
   (same thread).
 
-### 4.3 Waves (`World/Systems/Waves.fs`)
-Owns the wave clock and spawn queue. **No component maps** — this is a
-singleton system: `CVal`s for state, a plain `ResizeArray` queue (sim-only).
+### 4.3 Spawning (`World/Systems/Spawning.fs`)
+Kimo's `Systems/Spawning.fs` analog — owns **placement, the spawn queue, and
+the weighted table picks**. Waves composes *what* a wave contains; Spawning
+executes it. Emits spawn intents; the router forwards them to Enemies.
+
+```fsharp
+/// One wave's executable content (composed by Waves, executed here).
+[<Struct>]
+type WaveDef = {
+  Table: struct (EnemyDef * int)[]   // weighted enemy table (Kimo pickKey)
+  Count: int                          // total spawns in the wave
+  Interval: float32                   // seconds between spawns
+  InitialDelay: float32
+}
+
+type SpawningModel(rng: Random) =
+  member val Queue = ResizeArray<struct (EnemyDef * float32)>() with get, set
+  /// Own RNG stream — seeded by the caller, never shared with other systems.
+  member val Rng: Random = rng
+
+[<Struct>]
+type SpawnMsg = | FillWave of wave: WaveDef
+[<Struct>]
+type SpawnEvent = | SpawnEnemy of def: EnemyDef | SpawnFailed of reason: string
+```
+
+- **update** (cold path): `FillWave` builds the queue — one weighted
+  `pickKey` per spawn (Kimo's algorithm), spaced by `Interval`; the queue
+  stores `(def, remainingDelay)` pairs.
+- **tick dt** (hot path): drain the queue — decrement remaining delays,
+  emit `SpawnEnemy` for due entries, swap-remove (order not significant,
+  Kimo's pattern).
+- **Placement**: the map's `SpawnCell` + a walkable validation (Kimo's
+  `resolvePlacement`/`isWalkable` — `AtCell` semantics today; `NearCell`
+  ring search when procedural maps land in Phase 5).
+- **Deliberately no capacity/respawn invariant**: Kimo's zone capacity +
+  `EntityDied`→respawn serves ambient spawns; TD waves are finite batches.
+  Death/arrival handling lives in Enemies (events out).
+
+### 4.4 Waves (`World/Systems/Waves.fs`)
+The wave **director** — pure composition + state; no queue, no timing.
 
 ```fsharp
 type WavesModel() =
   member val WaveNumber = CVal.create 0 with get, set
   member val WaveActive = CVal.create false with get, set
   member val NextWaveIn = CVal.create 0f with get, set
-  member val Queue = ResizeArray<struct (EnemyDef * float32)>() with get, set
   member val Events = ResizeArray<WaveEvent>() with get, set
 
 [<Struct>]
 type WaveMsg = | StartNextWave
 [<Struct>]
-type WaveEvent = | WaveStarted of number: int | WaveCleared | EnemySpawn of def: EnemyDef
+type WaveEvent =
+  | WaveStarted of wave: WaveDef
+  | WaveCleared
 ```
 
-- `tick`: decrement `NextWaveIn`, pop due spawns (emit `EnemySpawn` — router →
-  `EnemyMsg.Spawn`), detect clear (queue empty && enemies count = 0) →
-  `WaveActive.Set false`, `WaveCleared` → Economy bonus.
-- Wave start wraps the multi-cell update in `Transaction.run` — **one**
-  notification delivery for the whole batch.
+- `composeWave waveNumber : WaveDef` — pure, deterministic per wave number
+  (difficulty budget scales count/interval/table weights). No RNG here: the
+  randomness lives in Spawning's picks (Kimo's rule: RNG streams are owned,
+  never shared).
+- `update`: `StartNextWave` → `composeWave` → `WaveStarted` event; the router
+  translates it into `SpawnMsg.FillWave` (declarative, no direct calls).
+- `tick dt`: decrement `NextWaveIn`; **wave-clear detection via direct
+  values** (hot path, no closures): the router passes `aliveCount` (from
+  `Enemies.Alive`) and `queueEmpty` (from Spawning) — when both are zero/
+  empty, `WaveActive.Set false` + `WaveCleared` → Economy bonus.
 - Owns its HUD projection: `WaveBanner = waveNumber |> AVal.map2 ... waveActive`.
 
-### 4.4 Towers (`World/Systems/Towers.fs`)
+### 4.5 Towers (`World/Systems/Towers.fs`)
 Owns placement, targeting, firing.
 
 ```fsharp
@@ -270,7 +314,7 @@ type TowerEvent = | Fired of tower: TowerId * enemy: EnemyId * damage: int
   world-distance against the transient enemy positions; write `Runtimes`
   rows; on fire emit `Fired` (router → Projectiles spawn + enemy damage).
 
-### 4.5 Projectiles (`World/Systems/Projectiles.fs`)
+### 4.6 Projectiles (`World/Systems/Projectiles.fs`)
 Owns in-flight shots. **The `bind` showcase** — see §5.
 
 ```fsharp
@@ -301,7 +345,7 @@ type ProjectileEvent = | Impact of projectile: ProjectileId * enemy: EnemyId * d
   `Enemies.Positions` directly), hit check, `Impact` event → router →
   `EnemyMsg.ApplyDamage`.
 
-### 4.6 Economy (`World/Systems/Economy.fs`)
+### 4.7 Economy (`World/Systems/Economy.fs`)
 Two singletons, one system.
 
 ```fsharp
@@ -317,7 +361,7 @@ No events (nothing consumes economy output except the view). Kills/arrivals
 reach it via router-translated `Cmd`; spends are validated by the caller
 against the reactive `Gold` aval. Owns its `GameOver` projection (`lives ≤ 0`).
 
-### 4.7 Map & Map Generation (`World/Systems/Map.fs`)
+### 4.8 Map & Map Generation (`World/Systems/Map.fs`)
 The map is a **`CellGrid2D<MapTile>`** (`Mibo.Layout`) — static content, built
 once at `World.init`, never mutated (same rule as Kimo's map/stores; not
 adaptive).
@@ -371,7 +415,7 @@ type MapModel = {
 | View culling when panning | `CellGrid2D.iterVisible` | Map.view (Phase 4 camera) |
 | Enemy movement | `Path: Vector2[]` from `getWorldPos` | Enemies.tick (physics phase) |
 
-### 4.8 Assets & Sprite Sheets (`Tiles.fs` — baked, no runtime parsing)
+### 4.9 Assets & Sprite Sheets (`Tiles.fs` — baked, no runtime parsing)
 `assets/` holds Kenney packs (CC0): `kenney_tower-defense-top-down` (the main
 sheet — 299 tiles: `path_*`/grass/dirt/stone/sand terrain, `turret_base_a/b`,
 `rocket_pod_*` (projectiles), crates/trees/rocks (decor/obstacles), coins,
@@ -390,7 +434,7 @@ buttons, crosshair, impact effects), `kenney_top-down-tanks-remastered`
   `IAssets`, cached) and indexes baked rects — zero parsing, zero lookups.
 - Sprites are plain data (never adaptive); the sim stays coordinate-only.
 
-### 4.9 VFX & Particles (`World/Systems/Vfx.fs`)
+### 4.10 VFX & Particles (`World/Systems/Vfx.fs`)
 Kimo Phase 4 analog — a dedicated VFX sub-system, but deliberately **the one
 non-adaptive system in the world**: per-particle adaptive cells would be node
 churn for pure presentation. VFX is fire-and-forget; nothing in the sim
@@ -560,7 +604,8 @@ let update (msg: WorldMsg) (model: WorldModel) : struct (WorldModel * Cmd<WorldM
     // materialize transient views of its input before mutating.
     let dt = ...
     Enemies.tick dt model.Enemies model.Map.Path          // physics/movement first
-    Waves.tick dt model.Waves model.Enemies               // emits EnemySpawn intents
+    Spawning.tick dt model.Spawning                       // drains queue → SpawnEnemy intents
+    Waves.tick dt model.Waves (aliveCount model) (queueEmpty model.Spawning)  // direct values
     Towers.tick dt model.Towers (transient model.Enemies.Alive)  // direct value
     Projectiles.tick dt model.Projectiles model.Enemies   // direct values
     model, Cmd.batch [...translated events...]
@@ -596,7 +641,8 @@ World/
     Map.fs            — CellGrid2D<MapTile> + generation (stamps / findPath),
                         waypoints; static
     Enemies.fs        — EnemiesModel (maps + own projections) + Msg/Event + update/tick/view
-    Waves.fs          — WavesModel + WaveMsg/WaveEvent + update/tick/view (banner)
+    Spawning.fs       — SpawningModel (queue + own RNG) + SpawnMsg/SpawnEvent + update/tick
+    Waves.fs          — WavesModel (director) + WaveMsg/WaveEvent + update/tick/view (banner)
     Towers.fs         — TowersModel + TowerMsg/TowerEvent + update/tick/view
     Projectiles.fs    — ProjectilesModel + ProjectileMsg/Event + update/tick/view
     Vfx.fs            — VfxModel (SoA particle pools) + VfxMsg + update/tick/view
@@ -671,13 +717,18 @@ all models) → `World.fs` → `Application.fs` → `Program.fs`.
 
 ### Phase 1 — Enemies, waves, economy (the adaptive showcase)
 - `EnemiesModel` component maps (Healths/Motions/Positions) + own projections
-  (Views/Alive); spawn/damage/tick along path; `Waves` slice with
-  `Transaction.run` wave start; `Economy` cells.
+  (Views/Alive); spawn/damage/tick along path; `Economy` cells.
+- **`Spawning` slice** (Kimo analog): queue + own seeded RNG, `FillWave`
+  (weighted `pickKey` picks, interval spacing), `tick` drain → `SpawnEnemy`
+  intents; spawn placement validated against the map's `SpawnCell`.
+- **`Waves` director**: pure `composeWave` (deterministic, budget-scaled),
+  `Transaction.run` wave start (wave number + active + queue fill batched
+  into one notification), clear detection via direct values.
 - Projections **1, 2, 4, 6, 7, 9** live; health bars and game-over overlay
   render from transient projection reads. **This phase is the AdaptiveSlop
   stress test** — kill a wave, watch the `chooseV`-joined view delta only the
   dead enemy, verify zero-allocation steady state (profiler + GC pause checks,
-  rule 10).
+  rule 10), then the GC/allocation trace.
 
 ### Phase 2 — Towers & projectiles (bind showcase)
 - `Towers` slice: placement (buildability projection **5**), targeting via
@@ -722,7 +773,7 @@ no new adaptive machinery needed.
 
 ### Phase 4 — HUD, VFX & polish
 - HUD overlay (gold/lives/wave/furthest-progress bar) from avals; wave banner.
-- **VFX subsystem (§4.9)**: impact bursts, death poofs, muzzle flashes,
+- **VFX subsystem (§4.10)**: impact bursts, death poofs, muzzle flashes,
   placement dust, base-hit rings — one `VfxMsg.Spawn` per router-translated
   event, SoA pools + `fadeAndCompact`, single `.particles(...)` draw call on
   the effects layer; optional floating damage text (small text pool) and
@@ -773,7 +824,7 @@ From the README/benchmarks + our own measurements — enforced, not aspirational
    that changes independently; don't split rows that always change together;
    don't add maps with no independent writer. A few maps per entity kind, not
    one per field.
-9. **Particles stay non-adaptive** (the VFX exception, §4.9): per-particle
+9. **Particles stay non-adaptive** (the VFX exception, §4.10): per-particle
    cells would be node churn for fire-and-forget presentation. SoA pools +
    `fadeAndCompact`; the only adaptive touch is the `ActiveParticles`
    diagnostics scalar.
@@ -792,8 +843,9 @@ From the README/benchmarks + our own measurements — enforced, not aspirational
   `HeadlessRunner.Step/StepUntil` runs the full sim in virtual time, no window
   ([Headless Mode](https://angelmunoz.github.io/Mibo/headless.html)).
 - **Per system** — `update` is `(Msg, Model, Query) → (Model, Events)`: pure
-  enough to unit test in isolation (Enemies: damage → death event; Waves: queue
-  drain → clear; Towers: range acquisition; Projectiles: homing hit).
+  enough to unit test in isolation (Enemies: damage → death event; Spawning:
+  FillWave → queue drain → SpawnEnemy intents; Waves: clear detection;
+  Towers: range acquisition; Projectiles: homing hit).
 - **Projection contracts** — after stepping, read the projections (transient
   `Alive`, `gameOver`, `Gold.Value`, `EnemyViews`) and assert they agree with
   the component maps. This is the contract between the MVU side and the graph

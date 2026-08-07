@@ -1,10 +1,10 @@
 // ─────────────────────────────────────────────────────────────
-// Bakes the Kenney tower-defense atlas XML into World/Tiles.fs
-// (compile-time dataset — no runtime XML parsing).
+// Bakes the Kenney atlas XML files into World/Tiles.fs
+// (compile-time datasets — no runtime XML parsing).
 //
 // Usage:  dotnet fsi tools/gen-tiles.fsx
-// The generated file is committed; regenerate when the sheet
-// changes. The curated mapping table below is the single place
+// The generated file is committed; regenerate when a sheet
+// changes. The curated mapping tables below are the single place
 // that assigns semantic names to atlas tiles.
 // ─────────────────────────────────────────────────────────────
 open System
@@ -12,72 +12,103 @@ open System.IO
 open System.Xml.Linq
 
 let root = Path.GetFullPath(Path.Combine(__SOURCE_DIRECTORY__, ".."))
-
-let xmlPath =
-  Path.Combine(
-    root,
-    "assets",
-    "kenney_tower-defense-top-down",
-    "towerDefense_tilesheet.xml"
-  )
-
 let outPath = Path.Combine(root, "World", "Tiles.fs")
-let sheetPath = "kenney_tower-defense-top-down/towerDefense_tilesheet.png"
 
-Directory.CreateDirectory(Path.GetDirectoryName outPath) |> ignore
+type Sheet = {
+  Module: string
+  Xml: string
+  SheetPath: string
+  Named: (string * string)[]
+  Groups: (string * string[])[]
+}
 
-let doc = XDocument.Load xmlPath
-
-let subs =
-  doc.Descendants(XName.Get "SubTexture")
-  |> Seq.map(fun e ->
-    let name = (e.Attribute(XName.Get "name").Value).Replace(".png", "")
-    let x = int(e.Attribute(XName.Get "x").Value)
-    let y = int(e.Attribute(XName.Get "y").Value)
-    let w = int(e.Attribute(XName.Get "width").Value)
-    let h = int(e.Attribute(XName.Get "height").Value)
-    struct (name, x, y, w, h))
-  |> Seq.toArray
-
-// ── Curated mapping: semantic name -> atlas tile name ──────────
-let named = [|
-  "grassFullA", "grass_full_a"
-  "grassFullB", "grass_full_b"
-  "grassFullC", "grass_full_c"
-  "dirtFullA", "dirt_full_a"
-  "dirtFullB", "dirt_full_b"
-  "dirtFullC", "dirt_full_c"
-  "pathVerticalDirt", "path_vertical_dirt"
-  "pathHorizontalDirt", "path_horizontal_dirt"
-  "pathEndUpDirt", "path_end_up_dirt"
-  "pathEndLeftDirt", "path_end_left_dirt"
-  "turretMountEmpty", "turret_mount_empty"
-  "turretBaseA", "turret_base_a"
-  "turretGreen", "turret_green"
-  "rocketPodSingle", "rocket_pod_single"
-  "rocketPodDual", "rocket_pod_dual"
-  "rocketSmall", "rocket_small"
-  "coinGold", "coin_gold"
-  "effectImpactBurst", "effect_impact_burst"
-  "effectImpactRing", "effect_impact_ring"
-  "effectImpactDebris", "effect_impact_debris"
-  "crosshair", "crosshair"
+let sheets: Sheet[] = [|
+  {
+    Module = "Tiles"
+    Xml =
+      Path.Combine(
+        root,
+        "assets",
+        "kenney_tower-defense-top-down",
+        "towerDefense_tilesheet.xml"
+      )
+    SheetPath = "kenney_tower-defense-top-down/towerDefense_tilesheet.png"
+    Named = [|
+      "grassFullA", "grass_full_a"
+      "grassFullB", "grass_full_b"
+      "grassFullC", "grass_full_c"
+      "dirtFullA", "dirt_full_a"
+      "dirtFullB", "dirt_full_b"
+      "dirtFullC", "dirt_full_c"
+      "pathVerticalDirt", "path_vertical_dirt"
+      "pathHorizontalDirt", "path_horizontal_dirt"
+      "pathEndUpDirt", "path_end_up_dirt"
+      "pathEndLeftDirt", "path_end_left_dirt"
+      "turretMountEmpty", "turret_mount_empty"
+      "turretBaseA", "turret_base_a"
+      "turretGreen", "turret_green"
+      "rocketPodSingle", "rocket_pod_single"
+      "rocketPodDual", "rocket_pod_dual"
+      "rocketSmall", "rocket_small"
+      "coinGold", "coin_gold"
+      "effectImpactBurst", "effect_impact_burst"
+      "effectImpactRing", "effect_impact_ring"
+      "effectImpactDebris", "effect_impact_debris"
+      "crosshair", "crosshair"
+    |]
+    Groups = [|
+      "groundGrass", [| "grassFullA"; "grassFullB"; "grassFullC" |]
+      "groundDirt", [| "dirtFullA"; "dirtFullB"; "dirtFullC" |]
+      "pathDirt",
+      [|
+        "pathVerticalDirt"
+        "pathHorizontalDirt"
+        "pathEndUpDirt"
+        "pathEndLeftDirt"
+      |]
+      "effects",
+      [| "effectImpactBurst"; "effectImpactRing"; "effectImpactDebris" |]
+    |]
+  }
+  {
+    Module = "Tanks"
+    Xml =
+      Path.Combine(
+        root,
+        "assets",
+        "kenney_top-down-tanks-remastered",
+        "allSprites_default.xml"
+      )
+    SheetPath = "kenney_top-down-tanks-remastered/allSprites_default.png"
+    Named = [|
+      "tankBodyGreen", "tankBody_green"
+      "tankBodyBlue", "tankBody_blue"
+      "tankBodyRed", "tankBody_red"
+      "tankBodyDark", "tankBody_dark"
+      "tankBodyBigRed", "tankBody_bigRed"
+      "tankBodyHuge", "tankBody_huge"
+      "tankBodyDarkLarge", "tankBody_darkLarge"
+      "bulletRed1", "bulletRed1"
+    |]
+    Groups = [|
+      "enemyBodies",
+      [|
+        "tankBodyGreen"
+        "tankBodyBlue"
+        "tankBodyRed"
+        "tankBodyDark"
+        "tankBodyBigRed"
+        "tankBodyHuge"
+        "tankBodyDarkLarge"
+      |]
+    |]
+  }
 |]
 
-let groups = [|
-  "groundGrass", [| "grassFullA"; "grassFullB"; "grassFullC" |]
-  "groundDirt", [| "dirtFullA"; "dirtFullB"; "dirtFullC" |]
-  "pathDirt",
-  [|
-    "pathVerticalDirt"
-    "pathHorizontalDirt"
-    "pathEndUpDirt"
-    "pathEndLeftDirt"
-  |]
-  "effects", [| "effectImpactBurst"; "effectImpactRing"; "effectImpactDebris" |]
-|]
-
-let findTile(atlasName: string) =
+let findTile
+  (subs: struct (string * int * int * int * int)[])
+  (atlasName: string)
+  =
   subs
   |> Array.tryFind(fun struct (n, _, _, _, _) -> n = atlasName)
   |> Option.defaultWith(fun () ->
@@ -92,7 +123,10 @@ line "// GENERATED by tools/gen-tiles.fsx — DO NOT EDIT BY HAND."
 line "// Regenerate with:  dotnet fsi tools/gen-tiles.fsx"
 
 line
-  "// Source: assets/kenney_tower-defense-top-down/towerDefense_tilesheet.xml"
+  "// Sources: assets/kenney_tower-defense-top-down/towerDefense_tilesheet.xml,"
+
+line
+  "//          assets/kenney_top-down-tanks-remastered/allSprites_default.xml"
 
 line "// ─────────────────────────────────────────────────────────────"
 line "namespace Defli.World"
@@ -100,71 +134,89 @@ line ""
 line "open System.Collections.Frozen"
 line "open System.Collections.Generic"
 line ""
-line "module Tiles ="
-line ""
-linef "  [<Literal>]"
-linef "  let SheetPath = %A" sheetPath
-line ""
-linef "  [<Literal>]"
 
-linef
-  "  let TileSize = %d"
-  (match subs with
-   | [||] -> 0
-   | _ -> (let struct (_, _, _, w, _) = subs[0] in w))
+for sheet in sheets do
+  let doc = XDocument.Load sheet.Xml
 
-line ""
+  let subs =
+    doc.Descendants(XName.Get "SubTexture")
+    |> Seq.map(fun e ->
+      let name = (e.Attribute(XName.Get "name").Value).Replace(".png", "")
+      let x = int(e.Attribute(XName.Get "x").Value)
+      let y = int(e.Attribute(XName.Get "y").Value)
+      let w = int(e.Attribute(XName.Get "width").Value)
+      let h = int(e.Attribute(XName.Get "height").Value)
+      struct (name, x, y, w, h))
+    |> Seq.toArray
 
-linef
-  "  /// All %d atlas tiles (name, position, size) baked at compile time."
-  subs.Length
+  linef "module %s =" sheet.Module
+  line ""
+  linef "  [<Literal>]"
+  linef "  let SheetPath = %A" sheet.SheetPath
+  line ""
 
-line
-  "  /// Canonical store: ordered and iterable. The name index is built from it."
+  if sheet.Module = "Tiles" then
+    linef "  [<Literal>]"
+    linef "  let TileSize = %d" (let struct (_, _, _, w, _) = subs[0] in w)
+    line ""
 
-line "  let all: TileInfo[] = [|"
-
-for struct (name, x, y, w, h) in subs do
   linef
-    "    { Name = %A; X = %d; Y = %d; Width = %d; Height = %d }"
-    name
-    x
-    y
-    w
-    h
+    "  /// All %d atlas tiles (name, position, size) baked at compile time."
+    subs.Length
 
-line "  |]"
-line ""
-line "  /// O(1) name index over the baked dataset (built once at module init)."
-line "  let byName: FrozenDictionary<string, TileInfo> ="
-line "    all"
-line "    |> Seq.map (fun t -> KeyValuePair(t.Name, t))"
-line "    |> FrozenDictionary.ToFrozenDictionary"
-line ""
+  line
+    "  /// Canonical store: ordered and iterable. The name index is built from it."
 
-line
-  "  /// Safe name lookup for data-driven code (tower/enemy defs, procedural gen)."
+  line "  let all: TileInfo[] = [|"
 
-line "  let tryByName (name: string) : TileInfo voption ="
-line "    Defli.FrozenDict.tryGetValue name byName"
-line ""
-line "  // ── Semantically named tiles (curated in the generator) ──"
+  for struct (name, x, y, w, h) in subs do
+    linef
+      "    { Name = %A; X = %d; Y = %d; Width = %d; Height = %d }"
+      name
+      x
+      y
+      w
+      h
 
-for semantic, atlasName in named do
-  let struct (_, x, y, w, h) = findTile atlasName
-  linef "  /// %s — atlas position (%d, %d), %dx%d." atlasName x y w h
-  linef "  let %s = byName[%A]" semantic atlasName
+  line "  |]"
+  line ""
 
-line ""
-line "  // ── Groups (curated in the generator) ──"
+  line
+    "  /// O(1) name index over the baked dataset (built once at module init)."
 
-for group, members in groups do
-  linef
-    "  let %s = [| %s |]"
-    group
-    (members |> Array.map(fun m -> m) |> String.concat "; ")
+  line "  let byName: FrozenDictionary<string, TileInfo> ="
+  line "    all"
+  line "    |> Seq.map (fun t -> KeyValuePair(t.Name, t))"
+  line "    |> FrozenDictionary.ToFrozenDictionary"
+  line ""
 
-line ""
+  line
+    "  /// Safe name lookup for data-driven code (tower/enemy defs, procedural gen)."
 
+  line "  let tryByName (name: string) : TileInfo voption ="
+  line "    Defli.FrozenDict.tryGetValue name byName"
+  line ""
+  line "  // ── Semantically named tiles (curated in the generator) ──"
+
+  for semantic, atlasName in sheet.Named do
+    let struct (_, x, y, w, h) = findTile subs atlasName
+    linef "  /// %s — atlas position (%d, %d), %dx%d." atlasName x y w h
+    linef "  let %s = byName[%A]" semantic atlasName
+
+  line ""
+  line "  // ── Groups (curated in the generator) ──"
+
+  for group, members in sheet.Groups do
+    linef "  let %s = [| %s |]" group (members |> String.concat "; ")
+
+  line ""
+
+Directory.CreateDirectory(Path.GetDirectoryName outPath) |> ignore
 File.WriteAllText(outPath, sb.ToString())
-printfn "Wrote %s (%d tiles)" outPath subs.Length
+
+for sheet in sheets do
+  let doc = XDocument.Load sheet.Xml
+  let count = doc.Descendants(XName.Get "SubTexture") |> Seq.length
+  printfn "%s: %d tiles" sheet.Module count
+
+printfn "Wrote %s" outPath

@@ -1,4 +1,5 @@
 <Solution>
   <Project Path="../AdaptiveSlop/src/AdaptiveSlop.Core/AdaptiveSlop.Core.fsproj" />
-  <Project Path="Defli.fsproj" />
+  <Project Path="src/Defli/Defli.fsproj" />
+  <Project Path="src/Defli.Tests/Defli.Tests.fsproj" />
 </Solution>

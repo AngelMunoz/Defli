@@ -4,7 +4,23 @@
   "tools": {
     "fantomas": {
       "version": "7.0.5",
-      "commands": ["fantomas"],
+      "commands": [
+        "fantomas"
+      ],
+      "rollForward": false
+    },
+    "ilspycmd": {
+      "version": "10.1.1.8388",
+      "commands": [
+        "ilspycmd"
+      ],
+      "rollForward": false
+    },
+    "dotnet-trace": {
+      "version": "9.0.661903",
+      "commands": [
+        "dotnet-trace"
+      ],
       "rollForward": false
     }
   }

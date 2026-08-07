@@ -41,6 +41,11 @@ module Inputs =
 
 module Application =
 
+  /// Cursor compensation (pixels) applied to the raw mouse position before
+  /// cell conversion. Tune this single constant if the hover/click highlight
+  /// disagrees with the OS cursor — do not touch Mibo's worldToCell.
+  let cursorOffset = Vector2(-24f, -24f)
+
   let init(_ctx: GameContext) : struct (Model * Cmd<Msg>) =
     let world = World.init WorldConfig.defaults
 
@@ -67,7 +72,8 @@ module Application =
     | MouseMoved pos -> { model with MousePos = pos }, Cmd.none
     | MouseClicked pos ->
       // Click → cell (tower placement intent; Towers validates in Phase 2).
-      let cell = Grid2DSpatial.worldToCell pos model.World.Map.Grid
+      let cell =
+        model.World.Map.Grid |> Grid2DSpatial.worldToCell(pos + cursorOffset)
 
       match cell with
       | ValueSome c -> model, Cmd.ofMsg(WorldMsg(PlaceTower c))
@@ -78,7 +84,8 @@ module Application =
 
   let view (ctx: GameContext) (model: Model) (buffer: RenderBuffer2D) =
     let hoverCell =
-      Grid2DSpatial.worldToCell model.MousePos model.World.Map.Grid
+      model.World.Map.Grid
+      |> Grid2DSpatial.worldToCell(model.MousePos + cursorOffset)
 
     World.view ctx model.World hoverCell buffer
 

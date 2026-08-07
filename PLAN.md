@@ -371,16 +371,23 @@ type MapModel = {
 | View culling when panning | `CellGrid2D.iterVisible` | Map.view (Phase 4 camera) |
 | Enemy movement | `Path: Vector2[]` from `getWorldPos` | Enemies.tick (physics phase) |
 
-### 4.8 Assets & Sprite Sheets (`Sprites.fs`)
+### 4.8 Assets & Sprite Sheets (`Tiles.fs` — baked, no runtime parsing)
 `assets/` holds Kenney packs (CC0): `kenney_tower-defense-top-down` (the main
 sheet — 299 tiles: `path_*`/grass/dirt/stone/sand terrain, `turret_base_a/b`,
 `rocket_pod_*` (projectiles), crates/trees/rocks (decor/obstacles), coins,
 buttons, crosshair, impact effects), `kenney_top-down-tanks-remastered`
 (enemy sprites), `kenney_racing-pack` (spare).
 
-- Each pack ships `*.png` + a Kenney `*.xml` atlas — parse the XML once at
-  startup into a frame table (`string -> Rectangle`), load the texture via
-  `IAssets`, and draw with `Draw.sprite` source rects. No per-frame parsing.
+- **The atlas is baked into the codebase, not parsed at runtime.**
+  `tools/gen-tiles.fsx` reads the Kenney XML once (dev-time) and emits
+  `World/Tiles.fs` — a committed, compile-checked dataset: `Tiles.all`
+  (299 `TileInfo` records with name + position + size), semantically named
+  accessors (`Tiles.grassFullA`, `Tiles.pathVerticalDirt`, …) and groups
+  (`Tiles.groundGrass`, `Tiles.pathDirt`, `Tiles.effects`).
+  Regenerate with `dotnet fsi tools/gen-tiles.fsx` when the sheet changes;
+  the curated semantic-name mapping lives at the top of the script.
+- Runtime loads exactly one texture (`assets.Texture Tiles.SheetPath` via
+  `IAssets`, cached) and indexes baked rects — zero parsing, zero lookups.
 - Sprites are plain data (never adaptive); the sim stays coordinate-only.
 
 ### 4.9 VFX & Particles (`World/Systems/Vfx.fs`)
@@ -584,7 +591,7 @@ World/
   Domain.fs           — typed ids (EnemyId/TowerId/ProjectileId), component structs
                         (Health/Motion/TowerStatic/...), MapTile/TerrainKind,
                         EnemyDef/TowerDef, path/waypoint types, constants
-  Sprites.fs          — Kenney XML atlas → frame table (string -> Rectangle)
+  Tiles.fs            — GENERATED baked atlas dataset (tools/gen-tiles.fsx)
   Systems/
     Map.fs            — CellGrid2D<MapTile> + generation (stamps / findPath),
                         waypoints; static
@@ -600,7 +607,7 @@ World/
                         WorldMsg, World.update (router), World.view
 ```
 
-Compile order in `Defli.fsproj` (topological): `Domain.fs` → `Sprites.fs` →
+Compile order in `Defli.fsproj` (topological): `Domain.fs` → `Tiles.fs` →
 `Systems/*.fs`
 (each defines its own projections) → `Projections.fs` (cross-subsystem, needs
 all models) → `World.fs` → `Application.fs` → `Program.fs`.
@@ -651,7 +658,7 @@ all models) → `World.fs` → `Application.fs` → `Program.fs`.
 ### Phase 0 — Skeleton & map (foundation)
 - fsproj: add AdaptiveSlop.Core reference; split `Program.fs` into shell +
   world skeleton (empty `WorldModel`, router with `RoomTick` passthrough).
-- `Domain.fs` component structs (`MapTile`, `TerrainKind`) + `Sprites.fs`
+- `Domain.fs` component structs (`MapTile`, `TerrainKind`) + baked `Tiles.fs`
   (Kenney XML atlas → frame table); `CellGrid2D` map + hand-authored path
   (Level-1 generation, stamps) drawn by `Map.view`; input map (click → tile
   via `worldToCell`, StartNextWave key); shell routes intents as `WorldMsg`.

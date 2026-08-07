@@ -63,7 +63,7 @@ let mkProgram(cfg: WorldConfig) =
   |> HeadlessProgram.withTick(fun gt -> WorldMsg.RoomTick gt)
 
 let mkRunner(cfg: WorldConfig) =
-  HeadlessRunner<WorldModel, WorldMsg>(mkProgram cfg)
+  new HeadlessRunner<WorldModel, WorldMsg>(mkProgram cfg)
 
 /// Coarse step for e2e timing tests (the sim is dt-agnostic — the
 /// movement/spawn math consumes dt directly).

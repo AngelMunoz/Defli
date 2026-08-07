@@ -12,11 +12,9 @@ let private cfg = TestData.Fixtures.cfg
 let private map = MapModel.create cfg
 let private model() = Enemies.init()
 
-let private aliveCount(m: EnemiesModel) =
-  (m.Alive :> IAdaptiveMap<int<EnemyId>, EnemyView>).GetValue().Count
+let private aliveCount(m: EnemiesModel) = m.Alive |> AMap.count |> AVal.getValue
 
-let private viewsCount(m: EnemiesModel) =
-  (m.Views :> IAdaptiveMap<int<EnemyId>, EnemyView>).GetValue().Count
+let private viewsCount(m: EnemiesModel) = m.Views |> AMap.count |> AVal.getValue
 
 let private hpOf (m: EnemiesModel) (eid: int<EnemyId>) =
   m.Healths |> CMap.tryGetValue eid

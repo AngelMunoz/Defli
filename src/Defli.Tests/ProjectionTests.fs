@@ -18,11 +18,9 @@ open Defli.World.Systems.Economy
 let private cfg = Fixtures.cfg
 let private map = MapModel.create cfg
 
-let private aliveView(m: EnemiesModel) =
-  (m.Alive :> IAdaptiveMap<int<EnemyId>, EnemyView>).GetValue()
+let private aliveView(m: EnemiesModel) = m.Alive |> AMap.getValue
 
-let private viewsView(m: EnemiesModel) =
-  (m.Views :> IAdaptiveMap<int<EnemyId>, EnemyView>).GetValue()
+let private viewsView(m: EnemiesModel) = m.Views |> AMap.getValue
 
 let private spawn (m: EnemiesModel) (def: EnemyDef) =
   let struct (m', _) = Enemies.update (EnemyMsg.Spawn def) m map.Path

@@ -14,50 +14,49 @@ namespace Defli
 // ─────────────────────────────────────────────────────────────
 
 module Dictionary =
-  open System.Collections.Generic
+    open System.Collections.Generic
 
-  let inline tryGetValue key (dictionary: IDictionary<_, _>) =
-    let mutable value = Unchecked.defaultof<_>
+    let inline tryGetValue key (dictionary: IDictionary<_, _>) =
+        let mutable value = Unchecked.defaultof<_>
 
-    if dictionary.TryGetValue(key, &value) then
-      ValueSome value
-    else
-      ValueNone
+        if dictionary.TryGetValue(key, &value) then
+            ValueSome value
+        else
+            ValueNone
 
 module ReadOnlyDict =
-  open System.Collections.Generic
+    open System.Collections.Generic
 
-  let inline tryGetValue key (dictionary: IReadOnlyDictionary<_, _>) =
-    let mutable value = Unchecked.defaultof<_>
+    let inline tryGetValue key (dictionary: IReadOnlyDictionary<_, _>) =
+        let mutable value = Unchecked.defaultof<_>
 
-    if dictionary.TryGetValue(key, &value) then
-      ValueSome value
-    else
-      ValueNone
+        if dictionary.TryGetValue(key, &value) then
+            ValueSome value
+        else
+            ValueNone
 
 module FrozenDict =
-  open System.Collections.Frozen
+    open System.Collections.Frozen
 
-  let inline tryGetValue key (dictionary: FrozenDictionary<_, _>) =
-    let mutable value = Unchecked.defaultof<_>
+    let inline tryGetValue key (dictionary: FrozenDictionary<_, _>) =
+        let mutable value = Unchecked.defaultof<_>
 
-    if dictionary.TryGetValue(key, &value) then
-      ValueSome value
-    else
-      ValueNone
+        if dictionary.TryGetValue(key, &value) then
+            ValueSome value
+        else
+            ValueNone
 
 module ValueOption =
 
-  /// Flattens two voptions without nested matches (projection joins).
-  let inline bind2 ([<InlineIfLambda>] binder) v1 v2 =
-    match struct (v1, v2) with
-    | ValueSome v1, ValueSome v2 -> binder v1 v2
-    | _ -> ValueNone
+    /// Flattens two voptions without nested matches (projection joins).
+    let inline bind2 ([<InlineIfLambda>] binder) v1 v2 =
+        match struct (v1, v2) with
+        | ValueSome v1, ValueSome v2 -> binder v1 v2
+        | _ -> ValueNone
 
 [<AutoOpen>]
 module Patterns =
-  open System.Collections.Generic
+    open System.Collections.Generic
 
-  /// Struct-tuple iteration over dictionaries — no heap tuple.
-  let inline (|KeyValueV|)(kvp: KeyValuePair<_, _>) =
-    struct (kvp.Key, kvp.Value)
+    /// Struct-tuple iteration over dictionaries — no heap tuple.
+    let inline (|KeyValueV|) (kvp: KeyValuePair<_, _>) = struct (kvp.Key, kvp.Value)

@@ -12,61 +12,66 @@ open System.IO
 open System.Xml.Linq
 
 let root = Path.GetFullPath(Path.Combine(__SOURCE_DIRECTORY__, ".."))
-let xmlPath = Path.Combine(root, "assets", "kenney_tower-defense-top-down", "towerDefense_tilesheet.xml")
+
+let xmlPath =
+    Path.Combine(root, "assets", "kenney_tower-defense-top-down", "towerDefense_tilesheet.xml")
+
 let outPath = Path.Combine(root, "World", "Tiles.fs")
 let sheetPath = "kenney_tower-defense-top-down/towerDefense_tilesheet.png"
 
 Directory.CreateDirectory(Path.GetDirectoryName outPath) |> ignore
 
 let doc = XDocument.Load xmlPath
+
 let subs =
-  doc.Descendants(XName.Get "SubTexture")
-  |> Seq.map (fun e ->
-    let name = (e.Attribute(XName.Get "name").Value).Replace(".png", "")
-    let x = int (e.Attribute(XName.Get "x").Value)
-    let y = int (e.Attribute(XName.Get "y").Value)
-    let w = int (e.Attribute(XName.Get "width").Value)
-    let h = int (e.Attribute(XName.Get "height").Value)
-    struct (name, x, y, w, h))
-  |> Seq.toArray
+    doc.Descendants(XName.Get "SubTexture")
+    |> Seq.map (fun e ->
+        let name = (e.Attribute(XName.Get "name").Value).Replace(".png", "")
+        let x = int (e.Attribute(XName.Get "x").Value)
+        let y = int (e.Attribute(XName.Get "y").Value)
+        let w = int (e.Attribute(XName.Get "width").Value)
+        let h = int (e.Attribute(XName.Get "height").Value)
+        struct (name, x, y, w, h))
+    |> Seq.toArray
 
 // ── Curated mapping: semantic name -> atlas tile name ──────────
 let named =
-  [|
-    "grassFullA", "grass_full_a"
-    "grassFullB", "grass_full_b"
-    "grassFullC", "grass_full_c"
-    "dirtFullA", "dirt_full_a"
-    "dirtFullB", "dirt_full_b"
-    "dirtFullC", "dirt_full_c"
-    "pathVerticalDirt", "path_vertical_dirt"
-    "pathHorizontalDirt", "path_horizontal_dirt"
-    "pathEndUpDirt", "path_end_up_dirt"
-    "pathEndLeftDirt", "path_end_left_dirt"
-    "turretMountEmpty", "turret_mount_empty"
-    "turretBaseA", "turret_base_a"
-    "turretGreen", "turret_green"
-    "rocketPodSingle", "rocket_pod_single"
-    "rocketPodDual", "rocket_pod_dual"
-    "rocketSmall", "rocket_small"
-    "coinGold", "coin_gold"
-    "effectImpactBurst", "effect_impact_burst"
-    "effectImpactRing", "effect_impact_ring"
-    "effectImpactDebris", "effect_impact_debris"
-    "crosshair", "crosshair"
-  |]
+    [| "grassFullA", "grass_full_a"
+       "grassFullB", "grass_full_b"
+       "grassFullC", "grass_full_c"
+       "dirtFullA", "dirt_full_a"
+       "dirtFullB", "dirt_full_b"
+       "dirtFullC", "dirt_full_c"
+       "pathVerticalDirt", "path_vertical_dirt"
+       "pathHorizontalDirt", "path_horizontal_dirt"
+       "pathEndUpDirt", "path_end_up_dirt"
+       "pathEndLeftDirt", "path_end_left_dirt"
+       "turretMountEmpty", "turret_mount_empty"
+       "turretBaseA", "turret_base_a"
+       "turretGreen", "turret_green"
+       "rocketPodSingle", "rocket_pod_single"
+       "rocketPodDual", "rocket_pod_dual"
+       "rocketSmall", "rocket_small"
+       "coinGold", "coin_gold"
+       "effectImpactBurst", "effect_impact_burst"
+       "effectImpactRing", "effect_impact_ring"
+       "effectImpactDebris", "effect_impact_debris"
+       "crosshair", "crosshair" |]
 
 let groups =
-  [|
-    "groundGrass", [| "grassFullA"; "grassFullB"; "grassFullC" |]
-    "groundDirt", [| "dirtFullA"; "dirtFullB"; "dirtFullC" |]
-    "pathDirt", [| "pathVerticalDirt"; "pathHorizontalDirt"; "pathEndUpDirt"; "pathEndLeftDirt" |]
-    "effects", [| "effectImpactBurst"; "effectImpactRing"; "effectImpactDebris" |]
-  |]
+    [| "groundGrass", [| "grassFullA"; "grassFullB"; "grassFullC" |]
+       "groundDirt", [| "dirtFullA"; "dirtFullB"; "dirtFullC" |]
+       "pathDirt",
+       [| "pathVerticalDirt"
+          "pathHorizontalDirt"
+          "pathEndUpDirt"
+          "pathEndLeftDirt" |]
+       "effects", [| "effectImpactBurst"; "effectImpactRing"; "effectImpactDebris" |] |]
 
 let findTile (atlasName: string) =
-  subs |> Array.tryFind (fun struct (n, _, _, _, _) -> n = atlasName)
-  |> Option.defaultWith (fun () -> failwithf "tile not found in atlas: %s" atlasName)
+    subs
+    |> Array.tryFind (fun struct (n, _, _, _, _) -> n = atlasName)
+    |> Option.defaultWith (fun () -> failwithf "tile not found in atlas: %s" atlasName)
 
 let sb = System.Text.StringBuilder()
 let line (s: string) = sb.AppendLine s |> ignore
@@ -88,13 +93,21 @@ linef "  [<Literal>]"
 linef "  let SheetPath = %A" sheetPath
 line ""
 linef "  [<Literal>]"
-linef "  let TileSize = %d" (match subs with | [||] -> 0 | _ -> (let struct (_,_,_,w,_) = subs[0] in w))
+
+linef
+    "  let TileSize = %d"
+    (match subs with
+     | [||] -> 0
+     | _ -> (let struct (_, _, _, w, _) = subs[0] in w))
+
 line ""
 linef "  /// All %d atlas tiles (name, position, size) baked at compile time." subs.Length
 line "  /// Canonical store: ordered and iterable. The name index is built from it."
 line "  let all: TileInfo[] = [|"
+
 for struct (name, x, y, w, h) in subs do
-  linef "    { Name = %A; X = %d; Y = %d; Width = %d; Height = %d }" name x y w h
+    linef "    { Name = %A; X = %d; Y = %d; Width = %d; Height = %d }" name x y w h
+
 line "  |]"
 line ""
 line "  /// O(1) name index over the baked dataset (built once at module init)."
@@ -108,14 +121,18 @@ line "  let tryByName (name: string) : TileInfo voption ="
 line "    Defli.FrozenDict.tryGetValue name byName"
 line ""
 line "  // ── Semantically named tiles (curated in the generator) ──"
+
 for semantic, atlasName in named do
-  let struct (_, x, y, w, h) = findTile atlasName
-  linef "  /// %s — atlas position (%d, %d), %dx%d." atlasName x y w h
-  linef "  let %s = byName[%A]" semantic atlasName
+    let struct (_, x, y, w, h) = findTile atlasName
+    linef "  /// %s — atlas position (%d, %d), %dx%d." atlasName x y w h
+    linef "  let %s = byName[%A]" semantic atlasName
+
 line ""
 line "  // ── Groups (curated in the generator) ──"
+
 for group, members in groups do
-  linef "  let %s = [| %s |]" group (members |> Array.map (fun m -> m) |> String.concat "; ")
+    linef "  let %s = [| %s |]" group (members |> Array.map (fun m -> m) |> String.concat "; ")
+
 line ""
 
 File.WriteAllText(outPath, sb.ToString())

@@ -11,8 +11,8 @@ namespace Defli.World
 
 [<Sealed>]
 type Projections() =
-  // Cross-subsystem projections (Phases 1-2):
-  //   Homing    = Projectiles.Rows × Enemies.Positions
-  //   Buildable = Map build tiles × Economy.Gold
-  //   RangeRing = hover cell × Towers.Statics
-  member _.Empty = ()
+    // Cross-subsystem projections (Phases 1-2):
+    //   Homing    = Projectiles.Rows × Enemies.Positions
+    //   Buildable = Map build tiles × Economy.Gold
+    //   RangeRing = hover cell × Towers.Statics
+    member _.Empty = ()

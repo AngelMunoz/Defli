@@ -26,11 +26,14 @@ let frames =
 let frameName(i: int) = frames[i] |> snd
 
 let events =
-  ((root.GetProperty("profiles"))[0]).GetProperty("events").EnumerateArray()
-  |> Seq.map(fun e ->
-    struct (e.GetProperty("type").GetString(),
-            e.GetProperty("frame").GetInt32(),
-            e.GetProperty("at").GetDouble()))
+  root.GetProperty("profiles").EnumerateArray()
+  |> Seq.collect(fun p ->
+    p.GetProperty("events").EnumerateArray()
+    |> Seq.map(fun e ->
+      struct (e.GetProperty("type").GetString(),
+              e.GetProperty("frame").GetInt32(),
+              e.GetProperty("at").GetDouble())))
+  |> Seq.sortBy(fun struct (_, _, at) -> at)
   |> Seq.toArray
 
 // Reconstruct the stack at each distinct timestamp → one sample.

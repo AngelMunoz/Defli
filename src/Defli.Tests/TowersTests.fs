@@ -4,6 +4,7 @@ open System.Collections.Generic
 open System.Numerics
 open Expecto
 open AdaptiveSlop.Core
+open Defli
 open Defli.World
 open Defli.World.Systems
 open TestData
@@ -27,6 +28,8 @@ let private def = {
   TargetPolicy = TargetPolicy.First
   SlowFactor = 1f
   SlowSeconds = 0f
+  UpgradeCost = 20
+  MaxLevel = 5
 }
 
 /// The fixture def with a specific targeting policy.
@@ -249,6 +252,35 @@ let tests =
         Expect.equal shot.SlowFactor TowerDefs.frost.SlowFactor "slow factor"
         Expect.equal shot.SlowSeconds TowerDefs.frost.SlowSeconds "slow seconds"
       | _ -> failtest "expected exactly one Fired")
+
+    testCase "Upgrade bumps the level; EffectiveDef composes scaled stats" (fun () ->
+      let m = model()
+      let cell = struct (3, 3)
+
+      let struct (m', _) = Towers.update (TowerMsg.Place(cell, def)) m
+      let tid = 0<TowerId>
+
+      // Level 1 → the base def.
+      let eff1 = m'.EffectiveDef |> AMap.getValue |> ReadOnlyDict.tryGetValue tid
+
+      match eff1 with
+      | ValueSome e -> Expect.equal e.Damage def.Damage "base damage"
+      | ValueNone -> failtest "effective def must exist"
+
+      // Level 2 → +25 % damage, +10 % fire rate, +0.5 range.
+      let struct (m2, _) = Towers.update (TowerMsg.Upgrade tid) m'
+
+      match m2.Levels |> CMap.tryGetValue tid with
+      | ValueSome lvl -> Expect.equal lvl 2 "level stored"
+      | ValueNone -> failtest "level must exist"
+
+      let eff2 = m2.EffectiveDef |> AMap.getValue |> ReadOnlyDict.tryGetValue tid
+
+      match eff2 with
+      | ValueSome e ->
+        Expect.equal e.Damage (int(float def.Damage * 1.25)) "scaled damage"
+        Expect.equal e.Range (def.Range + 0) "range round-half-down"
+      | ValueNone -> failtest "effective def must exist")
 
     testCase "cooldown gates firing" (fun () ->
       let m = model()

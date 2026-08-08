@@ -49,8 +49,9 @@ type Projections
         |> ValueOption.map(fun p -> { Pos = row.Pos; TargetPos = p })
         |> ValueOption.toOption))
 
-  /// #10 RangeRing — hovered own tower → its def (the view draws the
-  /// range circle). Hover is shell-owned; CellIndex/Statics are Towers'.
+  /// #10 RangeRing — hovered own tower → its EFFECTIVE def (the view
+  /// draws the range circle). The chain composes derived-on-derived:
+  /// hover × CellIndex × (Statics × Levels) — the upgrade showcase.
   member val RangeRing: aval<TowerDef voption> =
     hover
     |> AVal.bind(fun cell ->
@@ -60,8 +61,7 @@ type Projections
     |> AVal.bind(fun tid ->
       match tid with
       | ValueNone -> AVal.constant ValueNone
-      | ValueSome tid -> towers.Statics |> AMap.tryFind tid)
-    |> AVal.map(fun s -> s |> ValueOption.map(fun s -> s.Def))
+      | ValueSome tid -> towers.EffectiveDef |> AMap.tryFind tid)
 
   /// #5 PlacementPreview — the hovered cell's build status: blocked
   /// (path/occupied/out of grid), affordable, or too expensive.

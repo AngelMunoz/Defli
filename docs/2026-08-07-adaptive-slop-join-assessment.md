@@ -222,3 +222,56 @@ answer "will adaptive data bite us at scale". The answer there is
 still the linear growth + the per-element allocation drip. Watch the
 absolute ms/frame and the allocation samples per entity — not the
 ratio.
+
+## 11. Phase-5 Trace (waves 11 → 21, 2026-08-08)
+
+A 321.4 s capture of the Phase-5 build (procedural map, decorations,
+tower upgrades, difficulty tiers 2–4). Same method, same census. The
+file carries two threads — 12 ms of EventPipe-attach noise plus the
+game thread; the subtree tool aggregates all profiles.
+
+| Fact | Value |
+| --- | --- |
+| Game CPU busy time | 6.7 % of wall (21.4 s — 1.11 ms/frame) |
+| AdaptiveSlop busy time | 61.5 % of busy (4.1 % of wall — 0.68 ms/frame) |
+| GC frames in the busy profile | 0 (the drip is F# array ZeroCreate/Create in node recomputes) |
+| Towers.tick | 30.9 % of busy (2.05 % of wall) — #1, grew from 21.9 % |
+| Homing join | 18.6 % of busy (1.24 % of wall) — grew from 8.5 % |
+| Alive-count node pull (RoomTick) | 11.5 % of busy |
+| Alive/Views join | 11.1 % of busy |
+| Renderer2D (both passes) | 20.8 % of busy |
+
+Microscope (per-frame subtree attribution):
+
+- Towers.tick decomposition: 10.8 % own code, 6.8 % `AdaptiveNode<
+  Single>.GetValue` (cooldownA), and ~4 % (854 samples) node
+  CONSTRUCTORS on the tick path — the per-tower-per-tick `AMap.tryFind`
+  pattern builds fresh nodes every frame (source-verified: `tryFind`
+  is `new AdaptiveNode` per call). Runtimes is written for EVERY tower
+  every frame (cooldown decay), so every tower's chains re-run every
+  frame.
+- The Alive-count node (`Alive |> AMap.count |> AVal.getValue`,
+  RoomTick) is still pulled per frame (11.5 % of busy) — lever #1
+  from §5 remains unapplied here.
+- Homing grew 2.2×: more towers (upgrades phase) + longer-lived
+  enemies (tier 2–4 HP = 2.6–4.1×) → more shots in flight.
+
+### 11.1 The trend across all seven captures
+
+| Capture | Busy (% wall) | AdaptiveSlop busy-share | **AdaptiveSlop wall** | ms/frame (busy) |
+| --- | --- | --- | --- | --- |
+| Phase 1 | 0.75 % | 64.9 % | 0.49 % | 0.13 |
+| Wave 28 | 6.1 % | 5.3 % (flattened) | 0.30 % | 1.0 |
+| Start→11 | 0.8 % | 46.9 % | 0.40 % | 0.13 |
+| Phase 3 | 0.9 % | 53.6 % | 0.50 % | 0.15 |
+| Phase 4 (→10) | 1.3 % | 49.5 % | 0.62 % | 0.21 |
+| Phase 5 (→21) | 6.7 % | 61.5 % | 4.1 % | 1.11 |
+
+Reading: the §10 prediction materialized — absolute wall share jumped
+6.6× (0.62 % → 4.1 %) once the alive set grew (tier-scaled HP) and
+the tower count grew. Two drivers: the linear-in-entities per-element
+chains (Views/Homing/Alive) with a larger alive set, and the Towers
+per-tick `tryFind` node construction. 61.5 % of busy is the highest
+share recorded — this time the ratio is honest, not a mix artifact.
+Still far from the frame budget (6.7 % of 16.7 ms), but the growth
+rate is exactly the linear curve §1 predicted.

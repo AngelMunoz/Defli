@@ -16,6 +16,44 @@ let tests =
       Expect.isGreaterThanOrEqual w5.Interval 0.3f "interval floors"
       Expect.isGreaterThan w1.Count 0 "non-empty")
 
+    testCase "difficulty tiers scale every 5 waves" (fun () ->
+      // Waves 1-4: base stats. Wave 5: ×1.6 hp / ×1.07 speed / ×1.2
+      // reward. Wave 10: the same multipliers squared.
+      let hpOf (w: WaveDef) =
+        let struct (def, _) = w.Table[0]
+        def.Hp
+
+      let w1 = Waves.composeWave 1
+      let w5 = Waves.composeWave 5
+      let w10 = Waves.composeWave 10
+
+      Expect.equal (hpOf w1) EnemyDefs.grunt.Hp "wave 1 unscaled"
+      Expect.equal (hpOf w5) (int(float EnemyDefs.grunt.Hp * 1.6)) "wave 5 ×1.6"
+      Expect.equal
+        (hpOf w10)
+        (int(float EnemyDefs.grunt.Hp * 1.6 * 1.6))
+        "wave 10 ×1.6²"
+
+      // Rewards scale too, and never collapse to zero.
+      let rewardOf (w: WaveDef) =
+        let struct (def, _) = w.Table[0]
+        def.GoldReward
+
+      Expect.equal
+        (rewardOf w10)
+        (int(float EnemyDefs.grunt.GoldReward * 1.2 * 1.2))
+        "reward scaled"
+
+      // The Scale aval follows WaveNumber (the projection contract).
+      let m = Waves.init()
+      Expect.equal (AVal.getValue m.Scale).Hp 1f "base scale"
+      m.WaveNumber.Set 10
+
+      Expect.equal
+        (AVal.getValue m.Scale).Hp
+        (float32 (1.6 ** 2.0))
+        "tier 2 scale")
+
     testCase "fliers enter the tables from wave 4" (fun () ->
       let w4 = Waves.composeWave 4
 

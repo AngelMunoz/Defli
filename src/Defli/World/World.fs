@@ -24,6 +24,9 @@ type WorldMsg =
   | RoomTick of tick: GameTime
   | StartNextWave
   | PlaceTower of cell: struct (int * int)
+  /// Right-click on an own tower: upgrade it (the router validates
+  /// gold + level cap).
+  | UpgradeTower of cell: struct (int * int)
   | EnemyMsg of msgE: Enemies.EnemyMsg
   | SpawningMsg of msgS: Spawning.SpawnMsg
   | WavesMsg of msgW: Waves.WaveMsg
@@ -261,6 +264,35 @@ module World =
 
         model,
         Cmd.batch(translateWaveEvents model.Config.WaveClearBonus events model)
+    | UpgradeTower cell ->
+      // Cold path — resolve the tower under the cursor, validate gold
+      // and the level cap, then write (Towers.Upgrade) + pay.
+      match model.Towers.CellIndex |> CMap.tryGetValue cell with
+      | ValueNone -> model, Cmd.none
+      | ValueSome tid ->
+        let level =
+          model.Towers.Levels
+          |> CMap.tryGetValue tid
+          |> ValueOption.defaultValue 1
+
+        let def =
+          model.Towers.Statics
+          |> CMap.tryGetValue tid
+          |> ValueOption.map(fun s -> s.Def)
+          |> ValueOption.defaultValue TowerDefs.arrow
+
+        let capped = level >= def.MaxLevel
+        let affordable = AVal.getValue model.Economy.Gold >= def.UpgradeCost
+
+        if capped || not affordable then
+          model, Cmd.none
+        else
+          model,
+          Cmd.batch [|
+            Cmd.ofMsg(TowersMsg(Towers.Upgrade tid))
+            Cmd.ofMsg(EconomyMsg(Economy.SpendGold def.UpgradeCost))
+          |]
+
     | PlaceTower cell ->
       // Cold path — the router builds the placement query per message
       // (closure query record): buildable tile, occupancy, gold.
@@ -431,7 +463,7 @@ module World =
     buffer
       .text(
         font,
-        "WASD/arrows or middle-drag: pan   wheel: zoom   Home: reset",
+        "WASD/arrows or middle-drag: pan   wheel: zoom   Home: reset   right-click: upgrade",
         Vector2(12f, float32 ctx.WindowHeight - 30f),
         16f,
         layer = Layers.Hud

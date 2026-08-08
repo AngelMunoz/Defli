@@ -8,6 +8,8 @@ let allTests =
   testList "All" [
     DomainTests.tests
     MapTests.tests
+    MapTests.proceduralTests
+    MapTests.probeTests
     EnemiesTests.tests
     SpawningTests.tests
     WavesTests.tests

@@ -223,6 +223,74 @@ let tests =
            + TestData.Fixtures.grunt.GoldReward)
           "kill rewarded")
 
+    testCase "upgrade through the router: gold spent, scaled damage" (fun () ->
+      let runner = TestData.mkRunner cfg
+
+      runner.Dispatch(WorldMsg.PlaceTower(struct (2, 3)))
+      runner.StepN(2, TestData.dt)
+
+      // Upgrade the tower (arrow: UpgradeCost 40).
+      runner.Dispatch(WorldMsg.UpgradeTower(struct (2, 3)))
+      runner.StepN(1, TestData.dt)
+
+      let model = runner.Model
+
+      Expect.equal
+        (goldOf model)
+        (cfg.StartingGold - TowerDefs.arrow.Cost - TowerDefs.arrow.UpgradeCost)
+        "gold spent on upgrade"
+
+      match model.Towers.Levels |> CMap.tryGetValue(0<TowerId>) with
+      | ValueSome lvl -> Expect.equal lvl 2 "level 2"
+      | ValueNone -> failtest "level must exist"
+
+      // The tower fires with the EFFECTIVE (scaled) damage.
+      runner.Dispatch(
+        WorldMsg.EnemyMsg(Enemies.EnemyMsg.Spawn TestData.Fixtures.grunt)
+      )
+
+      let fired =
+        runner.StepUntil(
+          (fun m -> (m.Projectiles.Rows |> AMap.getValue).Count > 0),
+          TestData.dt,
+          60
+        )
+
+      Expect.isTrue fired "tower fired after upgrade"
+
+      match
+        (runner.Model.Projectiles.Rows |> AMap.getValue)
+        |> Seq.tryHead
+      with
+      | Some(KeyValueV(_, row)) ->
+        Expect.equal
+          row.Damage
+          (int(float TowerDefs.arrow.Damage * 1.25))
+          "scaled damage"
+      | None -> failtest "projectile row must exist")
+
+    testCase "upgrade is capped at MaxLevel" (fun () ->
+      let runner = TestData.mkRunner cfg
+      runner.Dispatch(WorldMsg.PlaceTower(struct (2, 3)))
+      runner.StepN(1, TestData.dt)
+
+      // Upgrade to the cap.
+      for _ in 1 .. TowerDefs.arrow.MaxLevel - 1 do
+        runner.Dispatch(WorldMsg.UpgradeTower(struct (2, 3)))
+
+      runner.StepN(2, TestData.dt)
+      let goldBefore = goldOf runner.Model
+
+      // Past the cap: nothing happens, no gold spent.
+      runner.Dispatch(WorldMsg.UpgradeTower(struct (2, 3)))
+      runner.StepN(1, TestData.dt)
+
+      Expect.equal (goldOf runner.Model) goldBefore "no gold spent at cap"
+
+      match runner.Model.Towers.Levels |> CMap.tryGetValue(0<TowerId>) with
+      | ValueSome lvl -> Expect.equal lvl TowerDefs.arrow.MaxLevel "capped"
+      | ValueNone -> failtest "level must exist")
+
     testCase "frost tower through the router slows the enemy" (fun () ->
       let runner = TestData.mkRunner cfg
 

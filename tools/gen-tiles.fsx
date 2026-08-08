@@ -66,6 +66,32 @@ let sheets: Sheet[] = [|
       "effectImpactRing", "effect_impact_ring"
       "effectImpactDebris", "effect_impact_debris"
       "crosshair", "crosshair"
+      "bushSmall", "bush_small"
+      "rockSmall", "rock_small"
+      "rockMedium", "rock_medium"
+      "rockLarge", "rock_large"
+      "crateMetalSquare", "crate_metal_square"
+      "crateMetalBeveled", "crate_metal_beveled"
+      "crateMetalDiamond", "crate_metal_diamond"
+      "crateMetalOctagon", "crate_metal_octagon"
+      "containerLarge", "container_large"
+      "containerSmall", "container_small"
+      "treeRound", "tree_round"
+      "treePine", "tree_pine"
+      "dirtDotOnGrass", "dirt_dot_on_grass"
+      "dirtCircleOnGrassTL", "dirt_circle_on_grass_top_left"
+      "dirtCircleOnGrassTR", "dirt_circle_on_grass_top_right"
+      "dirtCircleOnGrassBL", "dirt_circle_on_grass_bottom_left"
+      "dirtCircleOnGrassBR", "dirt_circle_on_grass_bottom_right"
+      "dirtPatchOnGrassTop", "dirt_patch_on_grass_top"
+      "dirtPatchOnGrassBottom", "dirt_patch_on_grass_bottom"
+      "dirtPatchOnGrassLeft", "dirt_patch_on_grass_left"
+      "dirtPatchOnGrassRight", "dirt_patch_on_grass_right"
+      "dirtPatchOnGrassTopLeft", "dirt_patch_on_grass_top_left"
+      "dirtPatchOnGrassTopRight", "dirt_patch_on_grass_top_right"
+      "dirtPatchOnGrassBottomLeft", "dirt_patch_on_grass_bottom_left"
+      "dirtPatchOnGrassBottomRight", "dirt_patch_on_grass_bottom_right"
+      "dirtPatchOnGrassCenter", "dirt_patch_on_grass_center"
     |]
     Groups = [|
       "groundGrass", [| "grassFullA"; "grassFullB"; "grassFullC" |]
@@ -79,6 +105,38 @@ let sheets: Sheet[] = [|
       |]
       "effects",
       [| "effectImpactBurst"; "effectImpactRing"; "effectImpactDebris" |]
+      "decoProps",
+      [|
+        "bushSmall"
+        "rockSmall"
+        "rockMedium"
+        "rockLarge"
+        "crateMetalSquare"
+        "crateMetalBeveled"
+        "crateMetalDiamond"
+        "crateMetalOctagon"
+        "containerLarge"
+        "containerSmall"
+        "treeRound"
+        "treePine"
+      |]
+      "dirtBlends",
+      [|
+        "dirtDotOnGrass"
+        "dirtCircleOnGrassTL"
+        "dirtCircleOnGrassTR"
+        "dirtCircleOnGrassBL"
+        "dirtCircleOnGrassBR"
+        "dirtPatchOnGrassTop"
+        "dirtPatchOnGrassBottom"
+        "dirtPatchOnGrassLeft"
+        "dirtPatchOnGrassRight"
+        "dirtPatchOnGrassTopLeft"
+        "dirtPatchOnGrassTopRight"
+        "dirtPatchOnGrassBottomLeft"
+        "dirtPatchOnGrassBottomRight"
+        "dirtPatchOnGrassCenter"
+      |]
       "enemyHulls",
       [|
         "tankHullGreen"

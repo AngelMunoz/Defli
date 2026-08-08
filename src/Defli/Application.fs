@@ -52,6 +52,7 @@ type Msg =
   | InputChanged of inputs: ActionState<GameAction>
   | MouseDelta of delta: MouseDelta
   | MouseClicked of pos: Vector2
+  | MouseRightClicked of pos: Vector2
   | WorldMsg of worldMsg: WorldMsg
 
 module Inputs =
@@ -77,10 +78,28 @@ module Inputs =
 module Application =
   open AdaptiveSlop.Core
 
-  /// Cursor compensation (pixels) applied to the raw mouse position before
-  /// cell conversion. Tune this single constant if the hover/click highlight
-  /// disagrees with the OS cursor — do not touch Mibo's worldToCell.
-  let cursorOffset = Vector2(-24f, -24f)
+  /// The grid cell CONTAINING a world position (floor of world/size) —
+  /// the tile under the cursor. Mibo's Grid2DSpatial.worldToCell rounds
+  /// to the NEAREST CENTER (a cursor in the right/bottom half of a tile
+  /// picks the NEXT one — the outline visibly cuts tiles in half); the
+  /// game wants the containing tile, so the pick is floor-based and
+  /// bounds-checked. Origin-aware (the map origin is Zero).
+  let inline cellAt
+    (worldPos: Vector2)
+    (grid: CellGrid2D<MapTile>)
+    : struct (int * int) voption =
+    // floor, not int: int truncates toward zero, which would map a
+    // position just left of the origin into cell 0.
+    let x =
+      int (floor ((worldPos.X - grid.Origin.X) / grid.CellSize.X))
+
+    let y =
+      int (floor ((worldPos.Y - grid.Origin.Y) / grid.CellSize.Y))
+
+    if x >= 0 && x < grid.Width && y >= 0 && y < grid.Height then
+      ValueSome(struct (x, y))
+    else
+      ValueNone
 
   /// Keyboard pan speed in screen pixels per second (the Camera
   /// subsystem converts by its zoom — panning feels constant on screen).
@@ -191,17 +210,12 @@ module Application =
         model.MiddleDown <- false
 
       // Hover cell — shell writes the CVal the world projections join on
-      // (screen → world through the camera, then cell).
+      // (screen → world through the camera, then the containing cell).
       let worldPos =
-        Camera.screenToWorld
-          model.World.Camera
-          model.Viewport
-          (delta.Position + cursorOffset)
+        Camera.screenToWorld model.World.Camera model.Viewport delta.Position
 
       let cell =
-        model.World.Map
-        |> MapModel.terrain
-        |> Grid2DSpatial.worldToCell worldPos
+        model.World.Map |> MapModel.terrain |> cellAt worldPos
 
       model.World.HoverCell |> CVal.set cell
 
@@ -223,18 +237,25 @@ module Application =
     | MouseClicked pos ->
       // Click → cell (tower placement intent; the router validates).
       let worldPos =
-        Camera.screenToWorld
-          model.World.Camera
-          model.Viewport
-          (pos + cursorOffset)
+        Camera.screenToWorld model.World.Camera model.Viewport pos
 
       let cell =
-        model.World.Map
-        |> MapModel.terrain
-        |> Grid2DSpatial.worldToCell worldPos
+        model.World.Map |> MapModel.terrain |> cellAt worldPos
 
       match cell with
       | ValueSome c -> model, Cmd.ofMsg(WorldMsg(PlaceTower c))
+      | ValueNone -> model, Cmd.none
+    | MouseRightClicked pos ->
+      // Right-click → cell (tower upgrade intent; the router resolves
+      // the tower and validates gold/cap).
+      let worldPos =
+        Camera.screenToWorld model.World.Camera model.Viewport pos
+
+      let cell =
+        model.World.Map |> MapModel.terrain |> cellAt worldPos
+
+      match cell with
+      | ValueSome c -> model, Cmd.ofMsg(WorldMsg(UpgradeTower c))
       | ValueNone -> model, Cmd.none
     | WorldMsg wm ->
       let struct (world, cmd) = World.update wm model.World
@@ -260,4 +281,5 @@ module Application =
       InputMapper.subscribeStatic Inputs.map InputChanged ctx
       Mouse.listen MouseDelta ctx
       Mouse.onLeftClick MouseClicked ctx
+      Mouse.onRightClick MouseRightClicked ctx
     ]

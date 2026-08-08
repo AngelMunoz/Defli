@@ -25,7 +25,11 @@ open Defli.World
 // ─────────────────────────────────────────────────────────────
 
 [<Struct>]
-type TowerMsg = Place of struct (struct (int * int) * TowerDef)
+type TowerMsg =
+  | Place of struct (struct (int * int) * TowerDef)
+  /// Cold path: bump the tower's level (the ROUTER validates gold
+  /// and the cap before sending).
+  | Upgrade of tower: int<TowerId>
 
 [<Struct>]
 type TowerEvent = Fired of shot: TowerShot
@@ -37,12 +41,34 @@ type TowersModel() =
   member val CellIndex =
     CMap.empty<struct (int * int), int<TowerId>> with get, set
 
+  /// Upgrade level per tower (1 = base def) — a SEPARATE component map
+  /// so the EffectiveDef projection composes on top of Statics
+  /// (Phase 5 projection-composition showcase).
+  member val Levels = CMap.empty<int<TowerId>, int> with get, set
+
   /// Tagged from the start — ids never pass through a plain int.
   member val NextId = 0<TowerId> with get, set
 
+  /// The EFFECTIVE def per tower: Statics.Def × Levels — derived
+  /// projections composing on derived projections (RangeRing joins on
+  /// this, the tick reads it transiently once per frame).
+  member val EffectiveDef: amap<int<TowerId>, TowerDef> =
+    Unchecked.defaultof<_> with get, set
+
 module Towers =
 
-  let init() = TowersModel()
+  let private buildEffectiveDef(m: TowersModel) : amap<int<TowerId>, TowerDef> =
+    m.Statics
+    |> AMap.mapA(fun tid s ->
+      m.Levels
+      |> AMap.tryFind tid
+      |> AVal.map(fun level ->
+        TowerDefs.effectiveDef s.Def (level |> ValueOption.defaultValue 1)))
+
+  let init() : TowersModel =
+    let m = TowersModel()
+    m.EffectiveDef <- buildEffectiveDef m
+    m
 
   /// Cold path: place a tower. The ROUTER validates (buildable tile,
   /// occupancy, gold) before sending — this only writes the rows.
@@ -64,6 +90,14 @@ module Towers =
         model.CellIndex |> CMap.addOrUpdate cell tid)
 
       model, Array.empty
+    | Upgrade tid ->
+      let level =
+        model.Levels
+        |> CMap.tryGetValue tid
+        |> ValueOption.defaultValue 1
+
+      model.Levels |> CMap.addOrUpdate tid (level + 1)
+      model, Array.empty
 
   /// Hot path: cooldown decay + target acquisition + fire.
   /// `alive` is a transient read of Enemies.Alive (direct value from
@@ -76,9 +110,18 @@ module Towers =
     : struct (TowersModel * TowerEvent seq) =
     let mutable events: ResizeArray<TowerEvent> = null
 
+    // ONE transient read of the composed projection per frame — the
+    // effective def (Statics × Levels) drives range/damage/rate/policy.
+    let effective = model.EffectiveDef |> AMap.getValue
+
     for KeyValueV(tid, s) in model.Statics |> AMap.getValue do
+      let def =
+        effective
+        |> ReadOnlyDict.tryGetValue tid
+        |> ValueOption.defaultValue s.Def
+
       let center = Cells.center s.Cell cellSize
-      let rangeWorld = float32 s.Def.Range * cellSize.X
+      let rangeWorld = float32 def.Range * cellSize.X
       let runtimes = model.Runtimes |> AMap.tryFind tid
       let targetA = runtimes |> AVal.map(ValueOption.bind _.Target)
 
@@ -104,7 +147,7 @@ module Towers =
               match best with
               | ValueNone -> true
               | ValueSome struct (_, bv, bd) ->
-                match s.Def.TargetPolicy with
+                match def.TargetPolicy with
                 | TargetPolicy.First -> v.Progress > bv.Progress
                 | TargetPolicy.Last -> v.Progress < bv.Progress
                 | TargetPolicy.Strongest -> v.MaxHp > bv.MaxHp
@@ -123,9 +166,9 @@ module Towers =
             Fired {
               Tower = tid
               Enemy = eid
-              Damage = s.Def.Damage
-              SlowFactor = s.Def.SlowFactor
-              SlowSeconds = s.Def.SlowSeconds
+              Damage = def.Damage
+              SlowFactor = def.SlowFactor
+              SlowSeconds = def.SlowSeconds
             }
           )
 
@@ -159,6 +202,8 @@ module Towers =
     let assets = GameContext.getService<IAssets> ctx
     let tex = assets.Texture Tiles.SheetPath
     let size = cellSize
+    let levels = model.Levels |> AMap.getValue
+    let font = Raylib.GetFontDefault()
 
     for KeyValueV(tid, s) in model.Statics |> AMap.getValue do
       let center = Cells.center s.Cell cellSize
@@ -189,3 +234,18 @@ module Towers =
             |> SpriteState.withLayer Layers.Entities
           )
           .drop())
+
+      // Upgrade level tag (Lv 2+), world-space above the tower.
+      levels
+      |> ReadOnlyDict.tryGetValue tid
+      |> ValueOption.iter(fun level ->
+        if level > 1 then
+          buffer
+            .text(
+              font,
+              $"Lv %d{level}",
+              center - Vector2(16f, size.Y / 2f + 18f),
+              12f,
+              layer = Layers.Entities
+            )
+            .drop())

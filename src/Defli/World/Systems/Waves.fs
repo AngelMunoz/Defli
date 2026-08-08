@@ -23,56 +23,71 @@ type WavesModel() =
   member val WaveNumber = CVal.create 0 with get, set
   member val WaveActive = CVal.create false with get, set
   member val Events = ResizeArray<WaveEvent>() with get, set
+  /// Difficulty scale derived from WaveNumber (Phase 5: enemies get
+  /// harder every 5 waves) — an aval projection over the wave state.
+  member val Scale: aval<WaveScale> = Unchecked.defaultof<_> with get, set
   // Own HUD projection (showcase #9): wave banner text.
   member val Banner: aval<string> = Unchecked.defaultof<_> with get, set
 
 module Waves =
 
   let private buildBanner(m: WavesModel) : aval<string> =
-    m.WaveActive
-    |> AVal.map2
-      (fun number active ->
+    m.WaveNumber
+    |> AVal.map3
+      (fun active scale number ->
         if active then
-          $"Wave %d{number}"
+          if scale.Hp > 1f then
+            $"Wave %d{number}  ×%.2f{scale.Hp}"
+          else
+            $"Wave %d{number}"
         else
           $"Press Enter — Wave %d{number + 1}")
-      m.WaveNumber
+      m.WaveActive
+      m.Scale
 
   let init() : WavesModel =
     let m = WavesModel()
+    m.Scale <- AVal.map WaveScale.ofWave m.WaveNumber
     m.Banner <- buildBanner m
     m
 
   /// Deterministic composition per wave number — no RNG here; the
   /// weighted table is executed (picked) by Spawning. Escalation:
   /// tanks from wave 3, fliers from wave 4, boss waves (every 5th)
-  /// mix all four archetypes.
+  /// mix all four archetypes. The difficulty scale (WaveScale — every
+  /// 5 waves) is applied to the table's defs HERE, so the spawned
+  /// defs carry the tier's stats.
   let composeWave(number: int) : WaveDef =
     let count = 5 + number * 2
     let interval = max 0.3f (1.2f - float32 number * 0.05f)
+    let scale = WaveScale.ofWave number
+
+    let scaleTable(table: struct (EnemyDef * int)[]) =
+      table
+      |> Array.map(fun struct (def, w) -> struct (WaveScale.apply scale def, w))
 
     let table =
       if number % 5 = 0 then
-        [|
+        scaleTable [|
           struct (EnemyDefs.grunt, 3)
           struct (EnemyDefs.runner, 2)
           struct (EnemyDefs.tank, 2)
           struct (EnemyDefs.flier, 1)
         |]
       elif number % 4 = 0 then
-        [|
+        scaleTable [|
           struct (EnemyDefs.grunt, 2)
           struct (EnemyDefs.runner, 3)
           struct (EnemyDefs.flier, 2)
         |]
       elif number % 3 = 0 then
-        [|
+        scaleTable [|
           struct (EnemyDefs.grunt, 3)
           struct (EnemyDefs.runner, 4)
           struct (EnemyDefs.tank, 1)
         |]
       else
-        [| struct (EnemyDefs.grunt, 4); struct (EnemyDefs.runner, 2) |]
+        scaleTable [| struct (EnemyDefs.grunt, 4); struct (EnemyDefs.runner, 2) |]
 
     {
       Table = table

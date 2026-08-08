@@ -51,15 +51,6 @@ type TerrainKind =
   | Stone
   | Sand
 
-[<Struct>]
-type MapTile = {
-  Terrain: TerrainKind
-  IsPath: bool
-  Buildable: bool
-  /// True on the path's waypoint cells (spawn/base — Waypoints layer).
-  IsWaypoint: bool
-}
-
 /// One baked atlas tile (position + size), see Tiles.fs.
 /// GENERATED data — the dataset is compile-time, no XML at runtime.
 [<Struct>]
@@ -79,9 +70,28 @@ type TileInfo = {
       float32 this.Height
     )
 
+[<Struct>]
+type MapTile = {
+  Terrain: TerrainKind
+  IsPath: bool
+  Buildable: bool
+  /// True on the path's waypoint cells (spawn/base — Waypoints layer).
+  IsWaypoint: bool
+  /// Decorations-layer frame to draw over the terrain (ValueNone =
+  /// no decoration on this cell).
+  Decoration: TileInfo voption
+}
+
 // ─────────────────────────────────────────────────────────────
 // World config (assembled outside the world — Kimo Phase 6 seam)
 // ─────────────────────────────────────────────────────────────
+
+/// Level-1 hand-authored road (fixed waypoints) vs Level-2 procedural
+/// (props scattered, road carved by findPath, floodFill validated).
+[<Struct>]
+type MapVariant =
+  | HandAuthored
+  | Procedural
 
 type WorldConfig = {
   Seed: int
@@ -90,6 +100,7 @@ type WorldConfig = {
   WaveClearBonus: int
   GridCols: int
   GridRows: int
+  MapVariant: MapVariant
 }
 
 module WorldConfig =
@@ -101,6 +112,7 @@ module WorldConfig =
     WaveClearBonus = 25
     GridCols = 20
     GridRows = 12
+    MapVariant = MapVariant.Procedural
   }
 
 // ─────────────────────────────────────────────────────────────
@@ -250,6 +262,9 @@ type TowerDef = {
   /// enemy's speed factor for SlowSeconds (frost tower).
   SlowFactor: float32
   SlowSeconds: float32
+  /// Gold cost per upgrade level (flat) and the level cap.
+  UpgradeCost: int
+  MaxLevel: int
 }
 
 module TowerDefs =
@@ -266,6 +281,8 @@ module TowerDefs =
     TargetPolicy = TargetPolicy.First
     SlowFactor = 1f
     SlowSeconds = 0f
+    UpgradeCost = 40
+    MaxLevel = 5
   }
 
   /// Frost — low damage, slows the target's movement (Motions.Slow
@@ -282,9 +299,26 @@ module TowerDefs =
     TargetPolicy = TargetPolicy.Weakest
     SlowFactor = 0.5f
     SlowSeconds = 2f
+    UpgradeCost = 60
+    MaxLevel = 5
   }
 
   let all = [| arrow; frost |]
+
+  /// The upgrade formula (pure): +25 % damage, +10 % fire rate, +0.5
+  /// range per level over the base def. Level 1 = the base def.
+  let effectiveDef (def: TowerDef) (level: int) : TowerDef =
+    if level <= 1 then
+      def
+    else
+      let l = float32(level - 1)
+
+      {
+        def with
+            Damage = int(float def.Damage * (1.0 + 0.25 * float l))
+            FireRate = def.FireRate * (1f + 0.1f * l)
+            Range = def.Range + int(l * 0.5f)
+      }
 
 /// Per-tower components (rows in the Towers sub-system's CMaps).
 /// Static vs runtime is the write-frequency grouping: Statics is written
@@ -330,6 +364,39 @@ type ProjectileSpawn = {
   SlowFactor: float32
   SlowSeconds: float32
 }
+
+/// Difficulty scaling per wave tier (every 5 waves the enemies get
+/// harder — Phase 5 difficulty curve data).
+[<Struct>]
+type WaveScale = {
+  Hp: float32
+  Speed: float32
+  Reward: float32
+}
+
+module WaveScale =
+
+  /// Tier = the wave's difficulty bracket: waves 1-4 → tier 0,
+  /// waves 5-9 → tier 1, etc. Each tier: +60 % HP, +7 % speed,
+  /// +20 % reward.
+  let ofWave (number: int) : WaveScale =
+    let tier = max 0 (number / 5)
+    let hp = float32 (1.6 ** float tier)
+    let speed = float32 (1.07 ** float tier)
+    let reward = float32 (1.2 ** float tier)
+
+    {
+      Hp = hp
+      Speed = speed
+      Reward = reward
+    }
+
+  let inline apply (scale: WaveScale) (def: EnemyDef) : EnemyDef = {
+    def with
+        Hp = max 1 (int(float def.Hp * float scale.Hp))
+        Speed = def.Speed * scale.Speed
+        GoldReward = max 1 (int(float def.GoldReward * float scale.Reward))
+  }
 
 /// A tower shot (TowerEvent.Fired payload) — what left the barrel.
 [<Struct>]

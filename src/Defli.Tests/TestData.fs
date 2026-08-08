@@ -21,6 +21,9 @@ module Fixtures =
     WaveClearBonus = 10
     GridCols = 20
     GridRows = 12
+    // Tests rely on the fixed road (cell (1,1) buildable, row 4 is
+    // the road) — the procedural variant is covered by its own tests.
+    MapVariant = MapVariant.HandAuthored
   }
 
   /// Test enemy definitions — distinct values catch mix-ups.

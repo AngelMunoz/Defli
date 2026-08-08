@@ -100,6 +100,7 @@ type EnemyArchetype =
   | Grunt
   | Runner
   | Tank
+  | Flier
 
 [<Struct>]
 type EnemyDef = {
@@ -108,8 +109,14 @@ type EnemyDef = {
   Hp: int
   Speed: float32
   GoldReward: int
-  /// Baked sprite name in the Tanks sheet (resolved at render time).
+  /// Baked sprite name in the Tiles sheet (tower-defense pack).
   Sprite: string
+  /// Baked turret name in the Tiles sheet, drawn centered over the
+  /// body and aimed at the heading (ValueNone = no turret).
+  Turret: string voption
+  /// Built-in orientation correction of the turret sprite, degrees
+  /// clockwise (0 = the sprite's barrel points up, like the bodies).
+  TurretAngle: float32
 }
 
 module EnemyDefs =
@@ -119,8 +126,10 @@ module EnemyDefs =
     Archetype = EnemyArchetype.Grunt
     Hp = 40
     Speed = 60f
-    GoldReward = 5
-    Sprite = "tankBody_green"
+    GoldReward = 3
+    Sprite = "tank_hull_green"
+    Turret = ValueSome "tank_turret_green"
+    TurretAngle = 0f
   }
 
   let runner = {
@@ -128,8 +137,10 @@ module EnemyDefs =
     Archetype = EnemyArchetype.Runner
     Hp = 20
     Speed = 110f
-    GoldReward = 7
-    Sprite = "tankBody_blue"
+    GoldReward = 5
+    Sprite = "tank_hull_green"
+    Turret = ValueNone
+    TurretAngle = 0f
   }
 
   let tank = {
@@ -137,11 +148,26 @@ module EnemyDefs =
     Archetype = EnemyArchetype.Tank
     Hp = 120
     Speed = 35f
-    GoldReward = 12
-    Sprite = "tankBody_huge"
+    GoldReward = 7
+    Sprite = "tank_hull_beige"
+    Turret = ValueSome "tank_turret_beige"
+    TurretAngle = 0f
   }
 
-  let all = [| grunt; runner; tank |]
+  /// Flies the straight line spawn → base (ignores the road).
+  /// A plane — no turret.
+  let flier = {
+    Key = "flier"
+    Archetype = EnemyArchetype.Flier
+    Hp = 30
+    Speed = 130f
+    GoldReward = 10
+    Sprite = "plane_gray"
+    Turret = ValueNone
+    TurretAngle = 0f
+  }
+
+  let all = [| grunt; runner; tank; flier |]
 
 /// Per-enemy components (rows in the Enemies sub-system's CMaps).
 [<Struct>]
@@ -180,6 +206,20 @@ type EnemyView = {
 // Tower definitions & components
 // ─────────────────────────────────────────────────────────────
 
+/// Which enemy a tower picks first among its in-range candidates.
+[<Struct>]
+type TargetPolicy =
+  /// Closest to the base (highest progress).
+  | First
+  /// Furthest from the base (lowest progress).
+  | Last
+  /// Highest max HP.
+  | Strongest
+  /// Lowest current HP.
+  | Weakest
+  /// Nearest to the tower.
+  | Closest
+
 [<Struct>]
 type TowerDef = {
   Key: string
@@ -193,6 +233,7 @@ type TowerDef = {
   ProjectileSpeed: float32
   /// Head sprite name in the Tiles sheet (drawn over turretBaseA).
   Sprite: string
+  TargetPolicy: TargetPolicy
 }
 
 module TowerDefs =
@@ -202,10 +243,11 @@ module TowerDefs =
     Name = "Arrow"
     Cost = 50
     Range = 3
-    Damage = 12
-    FireRate = 2f
+    Damage = 10
+    FireRate = 2.25f
     ProjectileSpeed = 240f
     Sprite = "rocket_pod_single"
+    TargetPolicy = TargetPolicy.First
   }
 
   let all = [| arrow |]

@@ -30,7 +30,9 @@ module Fixtures =
     Hp = 30
     Speed = 40f
     GoldReward = 2
-    Sprite = "tankBody_green"
+    Sprite = "tank_hull_green"
+    Turret = ValueSome "tank_turret_green"
+    TurretAngle = 0f
   }
 
   let runner = {
@@ -39,7 +41,9 @@ module Fixtures =
     Hp = 10
     Speed = 90f
     GoldReward = 3
-    Sprite = "tankBody_blue"
+    Sprite = "tank_hull_beige"
+    Turret = ValueSome "turret_missiles_dual"
+    TurretAngle = 90f
   }
 
   let tank = {
@@ -48,10 +52,24 @@ module Fixtures =
     Hp = 100
     Speed = 20f
     GoldReward = 5
-    Sprite = "tankBody_huge"
+    Sprite = "tank_hull_beige"
+    Turret = ValueSome "tank_turret_beige"
+    TurretAngle = 0f
   }
 
-  let all = [| grunt; runner; tank |]
+  /// Test flier — distinct values catch production mix-ups.
+  let flier = {
+    Key = "test_flier"
+    Archetype = EnemyArchetype.Flier
+    Hp = 15
+    Speed = 60f
+    GoldReward = 4
+    Sprite = "plane_gray"
+    Turret = ValueNone
+    TurretAngle = 0f
+  }
+
+  let all = [| grunt; runner; tank; flier |]
 
 // ─────────────────────────────────────────────────────────────
 // Headless program plumbing

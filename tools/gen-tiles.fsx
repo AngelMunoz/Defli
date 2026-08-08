@@ -12,7 +12,7 @@ open System.IO
 open System.Xml.Linq
 
 let root = Path.GetFullPath(Path.Combine(__SOURCE_DIRECTORY__, ".."))
-let outPath = Path.Combine(root, "World", "Tiles.fs")
+let outPath = Path.Combine(root, "src", "Defli", "World", "Tiles.fs")
 
 type Sheet = {
   Module: string
@@ -47,9 +47,20 @@ let sheets: Sheet[] = [|
       "turretMountEmpty", "turret_mount_empty"
       "turretBaseA", "turret_base_a"
       "turretGreen", "turret_green"
+      "turretRedDual", "turret_red_dual"
+      "turretMissilesDual", "turret_missiles_dual"
+      "tankTurretGreen", "tank_turret_green"
+      "tankTurretBeige", "tank_turret_beige"
+      "tankHullGreen", "tank_hull_green"
+      "tankHullBeige", "tank_hull_beige"
+      "planeGreen", "plane_green"
+      "planeGray", "plane_gray"
+      "planeGhostA", "plane_ghost_a"
+      "planeGhostB", "plane_ghost_b"
       "rocketPodSingle", "rocket_pod_single"
       "rocketPodDual", "rocket_pod_dual"
       "rocketSmall", "rocket_small"
+      "rocketLarge", "rocket_large"
       "coinGold", "coin_gold"
       "effectImpactBurst", "effect_impact_burst"
       "effectImpactRing", "effect_impact_ring"
@@ -68,38 +79,17 @@ let sheets: Sheet[] = [|
       |]
       "effects",
       [| "effectImpactBurst"; "effectImpactRing"; "effectImpactDebris" |]
-    |]
-  }
-  {
-    Module = "Tanks"
-    Xml =
-      Path.Combine(
-        root,
-        "assets",
-        "kenney_top-down-tanks-remastered",
-        "allSprites_default.xml"
-      )
-    SheetPath = "kenney_top-down-tanks-remastered/allSprites_default.png"
-    Named = [|
-      "tankBodyGreen", "tankBody_green"
-      "tankBodyBlue", "tankBody_blue"
-      "tankBodyRed", "tankBody_red"
-      "tankBodyDark", "tankBody_dark"
-      "tankBodyBigRed", "tankBody_bigRed"
-      "tankBodyHuge", "tankBody_huge"
-      "tankBodyDarkLarge", "tankBody_darkLarge"
-      "bulletRed1", "bulletRed1"
-    |]
-    Groups = [|
-      "enemyBodies",
+      "enemyHulls",
       [|
-        "tankBodyGreen"
-        "tankBodyBlue"
-        "tankBodyRed"
-        "tankBodyDark"
-        "tankBodyBigRed"
-        "tankBodyHuge"
-        "tankBodyDarkLarge"
+        "tankHullGreen"
+        "tankHullBeige"
+      |]
+      "enemyPlanes",
+      [|
+        "planeGreen"
+        "planeGray"
+        "planeGhostA"
+        "planeGhostB"
       |]
     |]
   }

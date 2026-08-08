@@ -24,7 +24,11 @@ let private def = {
   FireRate = 4f
   ProjectileSpeed = 200f
   Sprite = "rocket_pod_single"
+  TargetPolicy = TargetPolicy.First
 }
+
+/// The fixture def with a specific targeting policy.
+let private defWith(policy: TargetPolicy) = { def with TargetPolicy = policy }
 
 /// A single enemy standing at a position (transient Alive-shaped dict).
 let private enemyAt (pos: Vector2) (progress: float32) =
@@ -141,6 +145,89 @@ let tests =
       match events |> Seq.toArray with
       | [| Fired(_, eid, _) |] ->
         Expect.equal eid (2 * 1<EnemyId>) "first = highest progress"
+      | _ -> failtest "expected exactly one Fired")
+
+    // ── Phase 3: targeting policies ──
+
+    /// Two in-range enemies: id 1 = progress 0.2, 100 hp / 100 max;
+    /// id 2 = progress 0.8, 60 hp / 40 max (both at (4,3)).
+    let twoInRange =
+      let alive = Dictionary<int<EnemyId>, EnemyView>()
+
+      alive[1 * 1<EnemyId>] <- {
+        Pos = cellCenter struct (4, 3)
+        Hp = 100
+        MaxHp = 100
+        Progress = 0.2f
+        Slow = 1f
+        PathIndex = 1
+      }
+
+      alive[2 * 1<EnemyId>] <- {
+        Pos = cellCenter struct (4, 3)
+        Hp = 60
+        MaxHp = 40
+        Progress = 0.8f
+        Slow = 1f
+        PathIndex = 1
+      }
+
+      alive
+
+    /// The enemy id the policy picks from `twoInRange`.
+    let picked(policy: TargetPolicy) : int<EnemyId> =
+      let m = model()
+
+      let struct (m', _) =
+        Towers.update (TowerMsg.Place(struct (3, 3), defWith policy)) m
+
+      let struct (_, events) =
+        Towers.tick 0.1f m' (AMap.constant(fun () -> twoInRange)) cellSize
+
+      match events |> Seq.toArray with
+      | [| Fired(_, eid, _) |] -> eid
+      | _ -> failtest "expected exactly one Fired"
+
+    testCase "policy Last: lowest progress wins" (fun () ->
+      Expect.equal (picked TargetPolicy.Last) (1 * 1<EnemyId>) "last")
+
+    testCase "policy Strongest: highest max HP wins" (fun () ->
+      Expect.equal (picked TargetPolicy.Strongest) (1 * 1<EnemyId>) "strongest")
+
+    testCase "policy Weakest: lowest current HP wins" (fun () ->
+      Expect.equal (picked TargetPolicy.Weakest) (2 * 1<EnemyId>) "weakest")
+
+    testCase "policy Closest: nearest enemy wins" (fun () ->
+      let alive = Dictionary<int<EnemyId>, EnemyView>()
+
+      alive[1 * 1<EnemyId>] <- {
+        Pos = cellCenter struct (3, 3) + Vector2(40f, 0f)
+        Hp = 100
+        MaxHp = 100
+        Progress = 0.5f
+        Slow = 1f
+        PathIndex = 1
+      }
+
+      alive[2 * 1<EnemyId>] <- {
+        Pos = cellCenter struct (3, 3) + Vector2(100f, 0f)
+        Hp = 100
+        MaxHp = 100
+        Progress = 0.5f
+        Slow = 1f
+        PathIndex = 1
+      }
+
+      let m = model()
+
+      let struct (m', _) =
+        Towers.update (TowerMsg.Place(struct (3, 3), defWith TargetPolicy.Closest)) m
+
+      let struct (_, events) =
+        Towers.tick 0.1f m' (AMap.constant(fun () -> alive)) cellSize
+
+      match events |> Seq.toArray with
+      | [| Fired(_, eid, _) |] -> Expect.equal eid (1 * 1<EnemyId>) "closest"
       | _ -> failtest "expected exactly one Fired")
 
     testCase "cooldown gates firing" (fun () ->

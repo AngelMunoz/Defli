@@ -165,4 +165,62 @@ let tests =
       match m4.Motions |> CMap.tryGetValue eid with
       | ValueSome mv -> Expect.equal mv.Slow 1f "slow expired"
       | ValueNone -> failtest "enemy must exist")
+
+    // ── Phase 3: archetypes ──
+
+    testCase "flier flies the straight line spawn → base" (fun () ->
+      let m = model()
+
+      let struct (m', _) =
+        Enemies.update (EnemyMsg.Spawn Fixtures.flier) m map.Path
+
+      let eid = 0 * 1<EnemyId>
+      let spawn = map.Path[0]
+      let basePos = map.Path[map.Path.Length - 1]
+      let flyDist = Vector2.Distance(spawn, basePos)
+
+      // 1 second at 60 px/s (fixture speed) → 60 px along the line.
+      let struct (m2, _) = Enemies.tick 1.0f m' map.Path
+
+      match m2.Positions |> CMap.tryGetValue eid with
+      | ValueSome pos ->
+        let expected = Vector2.Lerp(spawn, basePos, 60f / flyDist)
+        Expect.equal pos expected "on the straight line"
+
+        // The road's second waypoint is NOT on that line (the road
+        // bends) — the flier must not be near it.
+        Expect.isGreaterThan (Vector2.Distance(pos, map.Path[1])) 100f "off the road"
+      | ValueNone -> failtest "flier must exist"
+
+      match m2.Motions |> CMap.tryGetValue eid with
+      | ValueSome mv -> Expect.equal mv.PathIndex 0 "no waypoint walking"
+      | ValueNone -> failtest "motion must exist")
+
+    testCase "flier arrives at the base and emits ReachedBase" (fun () ->
+      let m = model()
+
+      let struct (m', _) =
+        Enemies.update (EnemyMsg.Spawn Fixtures.flier) m map.Path
+
+      let eid = 0 * 1<EnemyId>
+      let spawn = map.Path[0]
+      let basePos = map.Path[map.Path.Length - 1]
+      let flyDist = Vector2.Distance(spawn, basePos)
+      let seconds = flyDist / Fixtures.flier.Speed + 5f
+
+      let mutable m2 = m'
+      let mutable events: EnemyEvent seq = Array.empty
+
+      for _ in 1 .. int (seconds / 0.5f) do
+        let struct (m3, ev) = Enemies.tick 0.5f m2 map.Path
+        m2 <- m3
+
+        if ev |> Seq.length > 0 then
+          events <- ev
+
+      match events |> Seq.tryHead with
+      | Some(ReachedBase arrived) ->
+        Expect.equal arrived eid "arrived id"
+        Expect.equal ((m2.Positions |> AMap.getValue).Count) 0 "removed"
+      | _ -> failtest "expected ReachedBase")
   ]

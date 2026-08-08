@@ -244,10 +244,10 @@
 	<SubTexture name="sand_patch_on_stone_right.png" x="768" y="640" width="64" height="64"/>
 	<SubTexture name="stone_circle_on_sand_bottom_left.png" x="832" y="640" width="64" height="64"/>
 	<SubTexture name="stone_circle_on_sand_bottom_right.png" x="896" y="640" width="64" height="64"/>
-	<SubTexture name="tank_green.png" x="960" y="640" width="64" height="64"/>
-	<SubTexture name="tank_slate.png" x="1024" y="640" width="64" height="64"/>
-	<SubTexture name="tank_brown.png" x="1088" y="640" width="64" height="64"/>
-	<SubTexture name="tank_gray.png" x="1152" y="640" width="64" height="64"/>
+	<SubTexture name="soldier_green.png" x="960" y="640" width="64" height="64"/>
+	<SubTexture name="soldier_slate.png" x="1024" y="640" width="64" height="64"/>
+	<SubTexture name="soldier_brown.png" x="1088" y="640" width="64" height="64"/>
+	<SubTexture name="soldier_gray.png" x="1152" y="640" width="64" height="64"/>
 	<SubTexture name="turret_green.png" x="1216" y="640" width="64" height="64"/>
 	<SubTexture name="turret_red_dual.png" x="1280" y="640" width="64" height="64"/>
 	<SubTexture name="rocket_small.png" x="1344" y="640" width="64" height="64"/>
@@ -267,8 +267,8 @@
 	<SubTexture name="sand_patch_on_stone_bottom_right.png" x="768" y="704" width="64" height="64"/>
 	<SubTexture name="sand_dot_on_stone.png" x="832" y="704" width="64" height="64"/>
 	<SubTexture name="stone_full_c.png" x="896" y="704" width="64" height="64"/>
-	<SubTexture name="crate_green.png" x="960" y="704" width="64" height="64"/>
-	<SubTexture name="crate_beige.png" x="1024" y="704" width="64" height="64"/>
+	<SubTexture name="tank_hull_green.png" x="961" y="704" width="64" height="64"/>
+	<SubTexture name="tank_hull_beige.png" x="1025" y="704" width="64" height="64"/>
 	<SubTexture name="plane_green.png" x="1088" y="704" width="64" height="64"/>
 	<SubTexture name="plane_gray.png" x="1152" y="704" width="64" height="64"/>
 	<SubTexture name="coin_gold.png" x="1216" y="704" width="64" height="64"/>

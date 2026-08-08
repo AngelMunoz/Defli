@@ -44,7 +44,9 @@ module Waves =
     m
 
   /// Deterministic composition per wave number — no RNG here; the
-  /// weighted table is executed (picked) by Spawning.
+  /// weighted table is executed (picked) by Spawning. Escalation:
+  /// tanks from wave 3, fliers from wave 4, boss waves (every 5th)
+  /// mix all four archetypes.
   let composeWave(number: int) : WaveDef =
     let count = 5 + number * 2
     let interval = max 0.3f (1.2f - float32 number * 0.05f)
@@ -53,8 +55,15 @@ module Waves =
       if number % 5 = 0 then
         [|
           struct (EnemyDefs.grunt, 3)
-          struct (EnemyDefs.runner, 3)
+          struct (EnemyDefs.runner, 2)
           struct (EnemyDefs.tank, 2)
+          struct (EnemyDefs.flier, 1)
+        |]
+      elif number % 4 = 0 then
+        [|
+          struct (EnemyDefs.grunt, 2)
+          struct (EnemyDefs.runner, 3)
+          struct (EnemyDefs.flier, 2)
         |]
       elif number % 3 = 0 then
         [|

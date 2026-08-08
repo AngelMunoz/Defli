@@ -16,6 +16,36 @@ let tests =
       Expect.isGreaterThanOrEqual w5.Interval 0.3f "interval floors"
       Expect.isGreaterThan w1.Count 0 "non-empty")
 
+    testCase "fliers enter the tables from wave 4" (fun () ->
+      let w4 = Waves.composeWave 4
+
+      Expect.contains
+        (w4.Table |> Array.map(fun struct (def, _) -> def.Key))
+        EnemyDefs.flier.Key
+        "wave 4 has fliers"
+
+      let w5 = Waves.composeWave 5
+
+      Expect.contains
+        (w5.Table |> Array.map(fun struct (def, _) -> def.Key))
+        EnemyDefs.flier.Key
+        "boss wave has fliers"
+
+      let w2 = Waves.composeWave 2
+
+      Expect.isFalse
+        (w2.Table |> Array.exists(fun struct (def, _) -> def.Key = EnemyDefs.flier.Key))
+        "early waves have no fliers")
+
+    testCase "composition is deterministic (no RNG in the director)" (fun () ->
+      let tableOf n =
+        Waves.composeWave n
+        |> fun w -> w.Table |> Array.map(fun struct (def, _) -> def.Key)
+
+      Expect.equal (tableOf 4) (tableOf 4) "wave 4 table stable"
+      Expect.equal (tableOf 5) (tableOf 5) "wave 5 table stable"
+      Expect.equal (tableOf 12) (tableOf 12) "wave 12 table stable")
+
     testCase "StartNextWave composes + activates, then refuses" (fun () ->
       let m = Waves.init()
       let struct (m', events) = Waves.update WaveMsg.StartNextWave m

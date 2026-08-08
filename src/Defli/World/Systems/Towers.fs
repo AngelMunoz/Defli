@@ -90,18 +90,31 @@ module Towers =
       let cooldown' = max 0f (cooldown - dt)
 
       if cooldown' <= 0f then
-        // Acquire a target: in range + exact distance, policy "first"
-        // (highest progress = closest to the base).
-        let mutable best: struct (int<EnemyId> * EnemyView) voption = ValueNone
+        // Acquire a target: in range + exact distance, then the def's
+        // policy decides among the candidates (Phase 3).
+        let mutable best: struct (int<EnemyId> * EnemyView * float32) voption =
+          ValueNone
 
         for KeyValueV(eid, v) in alive |> AMap.getValue do
-          if Vector2.Distance(center, v.Pos) <= rangeWorld then
-            match best with
-            | ValueSome struct (_, bv) when bv.Progress >= v.Progress -> ()
-            | _ -> best <- ValueSome struct (eid, v)
+          let d = Vector2.Distance(center, v.Pos)
+
+          if d <= rangeWorld then
+            let better =
+              match best with
+              | ValueNone -> true
+              | ValueSome struct (_, bv, bd) ->
+                match s.Def.TargetPolicy with
+                | TargetPolicy.First -> v.Progress > bv.Progress
+                | TargetPolicy.Last -> v.Progress < bv.Progress
+                | TargetPolicy.Strongest -> v.MaxHp > bv.MaxHp
+                | TargetPolicy.Weakest -> v.Hp < bv.Hp
+                | TargetPolicy.Closest -> d < bd
+
+            if better then
+              best <- ValueSome struct (eid, v, d)
 
         match best with
-        | ValueSome struct (eid, _) ->
+        | ValueSome struct (eid, _, _) ->
           if isNull events then
             events <- ResizeArray()
 

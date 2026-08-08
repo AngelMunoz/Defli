@@ -190,8 +190,10 @@ module Enemies =
           model.Motions |> CMap.addOrUpdate eid { mv with Slow = 1f }
         | ValueNone -> ()
 
-    // Movement along waypoints.
+    // Movement along waypoints. Fliers ignore the road: they interpolate
+    // the straight line spawn → base (world-space, not waypoint walking).
     let total = float32(path.Length - 1)
+    let flyDist = Vector2.Distance(path[0], path[path.Length - 1])
     let mutable events: ResizeArray<EnemyEvent> = null
     let mutable arrivals: ResizeArray<int<EnemyId>> = null
 
@@ -199,26 +201,62 @@ module Enemies =
       match model.Motions |> CMap.tryGetValue eid with
       | ValueNone -> ()
       | ValueSome mv ->
-        let mutable remaining = mv.Speed * mv.Slow * dt
-        let mutable idx = mv.PathIndex
+        let archetype =
+          model.Defs
+          |> CMap.tryGetValue eid
+          |> ValueOption.map(fun def -> def.Archetype)
+          |> ValueOption.defaultValue EnemyArchetype.Grunt
+
         let mutable p = pos
+        let mutable idx = mv.PathIndex
+        let mutable progress = mv.Progress
         let mutable arrived = false
 
-        while remaining > 0f && not arrived do
+        if archetype = EnemyArchetype.Flier then
+          // Straight-line flight: progress along spawn → base.
+          let step =
+            if flyDist <= 0f then
+              1f
+            else
+              (mv.Speed * mv.Slow * dt) / flyDist
+
+          progress <- min 1f (progress + step)
+          p <- Vector2.Lerp(path[0], path[path.Length - 1], progress)
+          idx <- 0
+          arrived <- progress >= 1f
+        else
+          // Waypoint walking (Grunt/Runner/Tank).
+          let mutable remaining = mv.Speed * mv.Slow * dt
+
+          while remaining > 0f && not arrived do
+            if idx >= path.Length - 1 then
+              arrived <- true
+            else
+              let target = path[idx + 1]
+              let d = target - p
+              let dist = d.Length()
+
+              if dist <= remaining then
+                p <- target
+                remaining <- remaining - dist
+                idx <- idx + 1
+              else
+                p <- p + (d / dist) * remaining
+                remaining <- 0f
+
           if idx >= path.Length - 1 then
             arrived <- true
-          else
-            let target = path[idx + 1]
-            let d = target - p
-            let dist = d.Length()
 
-            if dist <= remaining then
-              p <- target
-              remaining <- remaining - dist
-              idx <- idx + 1
+          progress <-
+            if idx >= path.Length - 1 then
+              1f
             else
-              p <- p + (d / dist) * remaining
-              remaining <- 0f
+              let segLen = Vector2.Distance(path[idx], path[idx + 1])
+
+              if segLen <= 0f then
+                float32 idx / total
+              else
+                (Vector2.Distance(path[idx], p) / segLen + float32 idx) / total
 
         if arrived then
           if isNull arrivals then
@@ -231,17 +269,6 @@ module Enemies =
 
           events.Add(ReachedBase eid)
         else
-          let progress =
-            if idx >= path.Length - 1 then
-              1f
-            else
-              let segLen = Vector2.Distance(path[idx], path[idx + 1])
-
-              if segLen <= 0f then
-                float32 idx / total
-              else
-                (Vector2.Distance(path[idx], p) / segLen + float32 idx) / total
-
           model.Positions |> CMap.addOrUpdate eid p
 
           model.Motions
@@ -271,7 +298,7 @@ module Enemies =
     (buffer: RenderBuffer2D)
     =
     let assets = GameContext.getService<IAssets> ctx
-    let tex = assets.Texture Tanks.SheetPath
+    let tex = assets.Texture Tiles.SheetPath
 
     let alive = model.Alive |> AMap.getValue
 
@@ -280,33 +307,63 @@ module Enemies =
     for KeyValueV(eid, v) in alive do
       defs
       |> ReadOnlyDict.tryGetValue eid
-      |> ValueOption.bind(_.Sprite >> Tanks.tryByName)
-      |> ValueOption.iter(fun tile ->
-        // Scale the baked sprite to a consistent ~44px while keeping aspect.
-        let scale = 44f / max (float32 tile.Width) (float32 tile.Height)
-        let w = float32 tile.Width * scale
-        let h = float32 tile.Height * scale
-
-        // Heading toward the next waypoint (0° = up; raylib rotates CW).
+      |> ValueOption.iter(fun def ->
+        // Heading: fliers fly the straight spawn → base line; the rest
+        // aim at the next waypoint (0° = up; raylib rotates CW).
         let angle =
-          if v.PathIndex >= path.Length - 1 then
+          if def.Archetype = EnemyArchetype.Flier then
+            let d = path[path.Length - 1] - path[0]
+            (MathF.Atan2(d.Y, d.X) * 180f / MathF.PI) % 360f
+          elif v.PathIndex >= path.Length - 1 then
             0f
           else
             let d = path[v.PathIndex + 1] - v.Pos
-            (90f + MathF.Atan2(d.Y, d.X) * 180f / MathF.PI) % 360f
+            (MathF.Atan2(d.Y, d.X) * 180f / MathF.PI) % 360f
 
-        buffer
-          .sprite(
-            SpriteState.create(
-              tex,
-              Rectangle(v.Pos.X - w / 2f, v.Pos.Y - h / 2f, w, h),
-              tile.Rect
+        def.Sprite
+        |> Tiles.tryByName
+        |> ValueOption.iter(fun tile ->
+          // Scale the baked sprite to a consistent ~44px while keeping aspect.
+          let scale = 44f / max (float32 tile.Width) (float32 tile.Height)
+          let w = float32 tile.Width * scale
+          let h = float32 tile.Height * scale
+
+          buffer
+            .sprite(
+              SpriteState.create(
+                tex,
+                Rectangle(v.Pos.X - w / 2f, v.Pos.Y - h / 2f, w, h),
+                tile.Rect
+              )
+              |> SpriteState.withOrigin(Vector2(w / 2f, h / 2f))
+              |> SpriteState.withRotation angle
+              |> SpriteState.withLayer Layers.Entities
             )
-            |> SpriteState.withOrigin(Vector2(w / 2f, h / 2f))
-            |> SpriteState.withRotation angle
-            |> SpriteState.withLayer Layers.Entities
-          )
-          .drop())
+            .drop())
+
+        // Turret — centered on the body, aimed at the heading plus the
+        // def's built-in orientation correction (0° = up in the sheet).
+        def.Turret
+        |> ValueOption.bind Tiles.tryByName
+        |> ValueOption.iter(fun turretTile ->
+          let tscale =
+            44f / max (float32 turretTile.Width) (float32 turretTile.Height)
+
+          let tw = float32 turretTile.Width * tscale
+          let th = float32 turretTile.Height * tscale
+
+          buffer
+            .sprite(
+              SpriteState.create(
+                tex,
+                Rectangle(v.Pos.X - tw / 2f, v.Pos.Y - th / 2f, tw, th),
+                turretTile.Rect
+              )
+              |> SpriteState.withOrigin(Vector2(tw / 2f, th / 2f))
+              |> SpriteState.withRotation(angle + def.TurretAngle)
+              |> SpriteState.withLayer Layers.Entities
+            )
+            .drop()))
 
       // Health bar (only when damaged).
       if v.Hp < v.MaxHp then

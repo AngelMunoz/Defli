@@ -11,12 +11,12 @@ open Defli
 let main _ =
   let program =
     Program.mkProgram Application.init Application.update
-    |> Program.withConfig(fun cfg -> {
-      cfg with
-          Width = 1280
-          Height = 800
-          Title = "Defli"
-    })
+    |> Program.withConfig(
+      GameConfig.withWidth 1280
+      >> GameConfig.withHeight 800
+      >> GameConfig.withTitle "Defli"
+      >> GameConfig.withTargetFPS 60
+    )
     |> Program.withAssetsBasePath "assets/"
     |> Program.withInput
     |> Program.withSubscription Application.subscribe

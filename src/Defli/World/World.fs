@@ -50,7 +50,7 @@ module World =
   // ── Event → Cmd translation (the router's only job) ──
 
   let private translateEnemyEvents
-    (events: Enemies.EnemyEvent[])
+    (events: Enemies.EnemyEvent seq)
     : Cmd<WorldMsg>[] =
     [|
       for ev in events do
@@ -62,7 +62,7 @@ module World =
     |]
 
   let private translateSpawnEvents
-    (events: Spawning.SpawnEvent[])
+    (events: Spawning.SpawnEvent seq)
     : Cmd<WorldMsg>[] =
     [|
       for ev in events do
@@ -91,7 +91,7 @@ module World =
 
           yield! translateSpawnEvents spawnEvents
         | Waves.WaveCleared ->
-          yield Cmd.ofMsg(EconomyMsg(Economy.EarnGold waveClearBonus))
+          Cmd.ofMsg(EconomyMsg(Economy.EarnGold waveClearBonus))
     |]
 
   /// Router — dispatch + translate only. No game logic.
@@ -116,14 +116,12 @@ module World =
       let struct (_, waveEvents) =
         Waves.Waves.tick dt model.Waves aliveCount queueEmpty
 
-      let cmds =
-        Array.concat [
-          translateEnemyEvents enemyEvents
-          translateSpawnEvents spawnEvents
-          translateWaveEvents model.Config.WaveClearBonus waveEvents model
-        ]
-
-      model, Cmd.batch cmds
+      model,
+      Cmd.batch [|
+        yield! translateEnemyEvents enemyEvents
+        yield! translateSpawnEvents spawnEvents
+        yield! translateWaveEvents model.Config.WaveClearBonus waveEvents model
+      |]
     | StartNextWave ->
       if AVal.getValue model.Economy.GameOver then
         model, Cmd.none

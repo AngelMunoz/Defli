@@ -50,14 +50,14 @@ let tests =
 
       // Before the initial delay: nothing.
       let struct (m2, events) = Spawning.tick 0.5f m'
-      Expect.equal events.Length 0 "nothing before delay"
+      Expect.hasLength events 0 "nothing before delay"
       Expect.equal m2.Queue.Count gruntWave.Count "queue intact"
 
       // Past the initial delay: one spawn.
       let struct (m3, events) = Spawning.tick 0.6f m2
 
-      match events with
-      | [| SpawnEnemy def |] -> Expect.equal def Fixtures.grunt "first spawn"
+      match events |> Seq.tryHead with
+      | Some(SpawnEnemy def) -> Expect.equal def Fixtures.grunt "first spawn"
       | _ -> failtest "expected one spawn"
 
       Expect.equal m3.Queue.Count (gruntWave.Count - 1) "one drained")
@@ -73,11 +73,11 @@ let tests =
 
           let spawns' =
             events
-            |> Array.choose (function
+            |> Seq.choose (function
               | SpawnEnemy def -> Some def.Key
               | SpawnFailed _ -> None)
 
-          spawns <- spawns @ List.ofArray spawns'
+          spawns <- spawns @ List.ofSeq spawns'
           m'.Queue <- m2.Queue
 
         spawns

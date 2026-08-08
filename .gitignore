@@ -480,3 +480,8 @@ $RECYCLE.BIN/
 
 # Vim temporary swap files
 *.swp
+
+# Trace artifacts
+*.nettrace
+*.nettrace.etlx
+*.speedscope.json

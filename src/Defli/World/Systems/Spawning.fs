@@ -92,7 +92,7 @@ module Spawning =
   let tick
     (dt: float32)
     (model: SpawningModel)
-    : struct (SpawningModel * SpawnEvent[]) =
+    : struct (SpawningModel * SpawnEvent seq) =
     let queue = model.Queue
     let mutable events: ResizeArray<SpawnEvent> = null
     let mutable i = queue.Count - 1
@@ -113,4 +113,4 @@ module Spawning =
 
       i <- i - 1
 
-    model, (if isNull events then Array.empty else events.ToArray())
+    model, (if isNull events then Array.empty else events)

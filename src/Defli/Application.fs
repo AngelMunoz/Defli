@@ -18,11 +18,14 @@ open Defli.World
 [<Struct>]
 type GameAction = | StartNextWave
 
-type Model = {
-  World: WorldModel
-  Input: ActionState<GameAction>
-  MousePos: Vector2
-}
+type Model() =
+  member val World: WorldModel = Unchecked.defaultof<_> with get, set
+
+  member val Input: ActionState<GameAction> =
+    Unchecked.defaultof<_> with get, set
+
+  member val MousePos: Vector2 = Unchecked.defaultof<_> with get, set
+
 
 [<Struct>]
 type Msg =
@@ -49,18 +52,17 @@ module Application =
   let init(_ctx: GameContext) : struct (Model * Cmd<Msg>) =
     let world = World.init WorldConfig.defaults
 
-    {
-      World = world
-      Input = ActionState.empty
-      MousePos = Vector2.Zero
-    },
-    Cmd.none
+    let model =
+      Model(World = world, Input = ActionState.empty, MousePos = Vector2.Zero)
+
+    model, Cmd.none
 
   let update (msg: Msg) (model: Model) : struct (Model * Cmd<Msg>) =
     match msg with
     | Tick gt ->
       let struct (world, cmd) = World.update (RoomTick gt) model.World
-      { model with World = world }, Cmd.map WorldMsg cmd
+      model.World <- world
+      model, Cmd.map WorldMsg cmd
     | InputChanged inputs ->
       let cmd =
         if inputs.Started.Contains GameAction.StartNextWave then
@@ -68,8 +70,11 @@ module Application =
         else
           Cmd.none
 
-      { model with Input = inputs }, cmd
-    | MouseMoved pos -> { model with MousePos = pos }, Cmd.none
+      model.Input <- inputs
+      model, cmd
+    | MouseMoved pos ->
+      model.MousePos <- pos
+      model, Cmd.none
     | MouseClicked pos ->
       // Click → cell (tower placement intent; Towers validates in Phase 2).
       let cell =
@@ -80,7 +85,8 @@ module Application =
       | ValueNone -> model, Cmd.none
     | WorldMsg wm ->
       let struct (world, cmd) = World.update wm model.World
-      { model with World = world }, Cmd.map WorldMsg cmd
+      model.World <- world
+      model, Cmd.map WorldMsg cmd
 
   let view (ctx: GameContext) (model: Model) (buffer: RenderBuffer2D) =
     let hoverCell =

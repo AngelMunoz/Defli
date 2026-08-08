@@ -125,17 +125,17 @@ let tests =
 
       // Path is 29 cells = 1856 px; runner at 90 px/s needs ~21s.
       let mutable m2 = m'
-      let mutable events: EnemyEvent[] = Array.empty
+      let mutable events: EnemyEvent seq = Array.empty
 
       for _ in 1..260 do
         let struct (m3, ev) = Enemies.tick 0.1f m2 map.Path
         m2 <- m3
 
-        if ev.Length > 0 then
+        if ev |> Seq.length > 0 then
           events <- ev
 
-      match events with
-      | [| ReachedBase eid |] ->
+      match events |> Seq.tryHead with
+      | Some(ReachedBase eid) ->
         Expect.equal
           ((m2.Healths |> AMap.getValue).Count)
           0

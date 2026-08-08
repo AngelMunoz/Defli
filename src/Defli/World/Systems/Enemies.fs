@@ -68,11 +68,10 @@ module Enemies =
     // mid-transaction reads (Alive filters it out).
     m.Positions
     |> AMap.mapA(fun eid pos ->
-      let healths = m.Healths |> AMap.tryFind eid
-      let motions = m.Motions |> AMap.tryFind eid
+      let healths: aval<Health voption> = m.Healths |> AMap.tryFind eid
+      let motions: aval<Motion voption> = m.Motions |> AMap.tryFind eid
 
-      (healths, motions)
-      ||> AVal.map2(fun h mv ->
+      let inline matchA (h: Health voption) (mv: Motion voption) =
         match struct (h, mv) with
         | ValueSome h, ValueSome mv -> {
             Pos = pos
@@ -90,7 +89,9 @@ module Enemies =
               Progress = 0f
               Slow = 1f
               PathIndex = 0
-            }))
+            }
+
+      motions |> AVal.map2 matchA healths)
 
   let private buildAlive(m: EnemiesModel) : amap<int<EnemyId>, EnemyView> =
     m.Views |> AMap.filter(fun _ v -> v.Hp > 0)
@@ -167,7 +168,7 @@ module Enemies =
     (dt: float32)
     (model: EnemiesModel)
     (path: Vector2[])
-    : struct (EnemiesModel * EnemyEvent[]) =
+    : struct (EnemiesModel * EnemyEvent seq) =
     // Expire slow timers (collect first — mutating during iteration is unsafe).
     let mutable expired: ResizeArray<int<EnemyId>> = null
 
@@ -259,7 +260,7 @@ module Enemies =
           model.Positions |> CMap.remove eid
           model.Defs |> CMap.remove eid)
 
-    model, (if isNull events then Array.empty else events.ToArray())
+    model, (if isNull events then Array.empty else events)
 
   // ── View (sprites + health bars from the Alive projection) ──
 

@@ -25,6 +25,8 @@ let private def = {
   ProjectileSpeed = 200f
   Sprite = "rocket_pod_single"
   TargetPolicy = TargetPolicy.First
+  SlowFactor = 1f
+  SlowSeconds = 0f
 }
 
 /// The fixture def with a specific targeting policy.
@@ -34,7 +36,7 @@ let private defWith(policy: TargetPolicy) = { def with TargetPolicy = policy }
 let private enemyAt (pos: Vector2) (progress: float32) =
   let d = Dictionary<int<EnemyId>, EnemyView>()
 
-  d[0 * 1<EnemyId>] <- {
+  d[0<EnemyId>] <- {
     Pos = pos
     Hp = 100
     MaxHp = 100
@@ -63,10 +65,10 @@ let tests =
       Expect.equal (m'.Runtimes |> AMap.getValue).Count 1 "runtimes"
 
       match m'.CellIndex |> CMap.tryGetValue cell with
-      | ValueSome tid -> Expect.equal tid (0 * 1<TowerId>) "indexed"
+      | ValueSome tid -> Expect.equal tid (0<TowerId>) "indexed"
       | ValueNone -> failtest "cell must be indexed"
 
-      match m'.Statics |> CMap.tryGetValue(0 * 1<TowerId>) with
+      match m'.Statics |> CMap.tryGetValue(0<TowerId>) with
       | ValueSome s -> Expect.equal s.Def def "def stored"
       | ValueNone -> failtest "tower must exist")
 
@@ -82,7 +84,7 @@ let tests =
       Expect.isEmpty events "no fire"
       Expect.equal (Seq.length events) 0 "no events"
 
-      match m2.Runtimes |> CMap.tryGetValue(0 * 1<TowerId>) with
+      match m2.Runtimes |> CMap.tryGetValue(0<TowerId>) with
       | ValueSome r -> Expect.equal r.Cooldown 0f "ready"
       | ValueNone -> failtest "runtime must exist")
 
@@ -99,16 +101,16 @@ let tests =
       let struct (m2, events) = Towers.tick 0.1f m' alive cellSize
 
       match events |> Seq.toArray with
-      | [| Fired(tid, eid, damage) |] ->
-        Expect.equal tid (0 * 1<TowerId>) "tower id"
-        Expect.equal eid (0 * 1<EnemyId>) "enemy id"
-        Expect.equal damage def.Damage "damage"
+      | [| Fired shot |] ->
+        Expect.equal shot.Tower (0<TowerId>) "tower id"
+        Expect.equal shot.Enemy (0<EnemyId>) "enemy id"
+        Expect.equal shot.Damage def.Damage "damage"
       | _ -> failtest "expected exactly one Fired"
 
-      match m2.Runtimes |> CMap.tryGetValue(0 * 1<TowerId>) with
+      match m2.Runtimes |> CMap.tryGetValue(0<TowerId>) with
       | ValueSome r ->
         Expect.equal r.Cooldown (1f / def.FireRate) "cooldown set"
-        Expect.equal r.Target (ValueSome(0 * 1<EnemyId>)) "target stored"
+        Expect.equal r.Target (ValueSome(0<EnemyId>)) "target stored"
       | ValueNone -> failtest "runtime must exist")
 
     testCase "first policy: picks the enemy closest to the base" (fun () ->
@@ -120,7 +122,7 @@ let tests =
       // Two enemies both in range; the one with higher progress wins.
       let alive = Dictionary<int<EnemyId>, EnemyView>()
 
-      alive[1 * 1<EnemyId>] <- {
+      alive[1<EnemyId>] <- {
         Pos = cellCenter struct (4, 3)
         Hp = 100
         MaxHp = 100
@@ -129,7 +131,7 @@ let tests =
         PathIndex = 1
       }
 
-      alive[2 * 1<EnemyId>] <- {
+      alive[2<EnemyId>] <- {
         Pos = cellCenter struct (4, 2)
         Hp = 100
         MaxHp = 100
@@ -143,8 +145,8 @@ let tests =
       let struct (_, events) = Towers.tick 0.1f m' alive cellSize
 
       match events |> Seq.toArray with
-      | [| Fired(_, eid, _) |] ->
-        Expect.equal eid (2 * 1<EnemyId>) "first = highest progress"
+      | [| Fired shot |] ->
+        Expect.equal shot.Enemy (2<EnemyId>) "first = highest progress"
       | _ -> failtest "expected exactly one Fired")
 
     // ── Phase 3: targeting policies ──
@@ -154,7 +156,7 @@ let tests =
     let twoInRange =
       let alive = Dictionary<int<EnemyId>, EnemyView>()
 
-      alive[1 * 1<EnemyId>] <- {
+      alive[1<EnemyId>] <- {
         Pos = cellCenter struct (4, 3)
         Hp = 100
         MaxHp = 100
@@ -163,7 +165,7 @@ let tests =
         PathIndex = 1
       }
 
-      alive[2 * 1<EnemyId>] <- {
+      alive[2<EnemyId>] <- {
         Pos = cellCenter struct (4, 3)
         Hp = 60
         MaxHp = 40
@@ -185,22 +187,22 @@ let tests =
         Towers.tick 0.1f m' (AMap.constant(fun () -> twoInRange)) cellSize
 
       match events |> Seq.toArray with
-      | [| Fired(_, eid, _) |] -> eid
+      | [| Fired shot |] -> shot.Enemy
       | _ -> failtest "expected exactly one Fired"
 
     testCase "policy Last: lowest progress wins" (fun () ->
-      Expect.equal (picked TargetPolicy.Last) (1 * 1<EnemyId>) "last")
+      Expect.equal (picked TargetPolicy.Last) (1<EnemyId>) "last")
 
     testCase "policy Strongest: highest max HP wins" (fun () ->
-      Expect.equal (picked TargetPolicy.Strongest) (1 * 1<EnemyId>) "strongest")
+      Expect.equal (picked TargetPolicy.Strongest) (1<EnemyId>) "strongest")
 
     testCase "policy Weakest: lowest current HP wins" (fun () ->
-      Expect.equal (picked TargetPolicy.Weakest) (2 * 1<EnemyId>) "weakest")
+      Expect.equal (picked TargetPolicy.Weakest) (2<EnemyId>) "weakest")
 
     testCase "policy Closest: nearest enemy wins" (fun () ->
       let alive = Dictionary<int<EnemyId>, EnemyView>()
 
-      alive[1 * 1<EnemyId>] <- {
+      alive[1<EnemyId>] <- {
         Pos = cellCenter struct (3, 3) + Vector2(40f, 0f)
         Hp = 100
         MaxHp = 100
@@ -209,7 +211,7 @@ let tests =
         PathIndex = 1
       }
 
-      alive[2 * 1<EnemyId>] <- {
+      alive[2<EnemyId>] <- {
         Pos = cellCenter struct (3, 3) + Vector2(100f, 0f)
         Hp = 100
         MaxHp = 100
@@ -227,7 +229,25 @@ let tests =
         Towers.tick 0.1f m' (AMap.constant(fun () -> alive)) cellSize
 
       match events |> Seq.toArray with
-      | [| Fired(_, eid, _) |] -> Expect.equal eid (1 * 1<EnemyId>) "closest"
+      | [| Fired shot |] -> Expect.equal shot.Enemy (1<EnemyId>) "closest"
+      | _ -> failtest "expected exactly one Fired")
+
+    testCase "frost def → Fired carries the slow payload" (fun () ->
+      let m = model()
+      let cell = struct (3, 3)
+
+      let struct (m', _) =
+        Towers.update (TowerMsg.Place(cell, TowerDefs.frost)) m
+
+      let alive =
+        AMap.constant(fun () -> enemyAt (cellCenter struct (4, 3)) 0.5f)
+
+      let struct (_, events) = Towers.tick 0.1f m' alive cellSize
+
+      match events |> Seq.toArray with
+      | [| Fired shot |] ->
+        Expect.equal shot.SlowFactor TowerDefs.frost.SlowFactor "slow factor"
+        Expect.equal shot.SlowSeconds TowerDefs.frost.SlowSeconds "slow seconds"
       | _ -> failtest "expected exactly one Fired")
 
     testCase "cooldown gates firing" (fun () ->

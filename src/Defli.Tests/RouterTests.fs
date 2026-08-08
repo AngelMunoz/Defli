@@ -1,7 +1,9 @@
 module Defli.Tests.RouterTests
 
 open Expecto
+open System.Collections.Generic
 open AdaptiveSlop.Core
+open Defli
 open Defli.World
 open Defli.World.Systems
 open Defli.World.Systems.Waves
@@ -220,4 +222,32 @@ let tests =
           (cfg.StartingGold - TowerDefs.arrow.Cost
            + TestData.Fixtures.grunt.GoldReward)
           "kill rewarded")
+
+    testCase "frost tower through the router slows the enemy" (fun () ->
+      let runner = TestData.mkRunner cfg
+
+      // Frost fires slower but applies the Slow factor on impact.
+      runner.Dispatch(WorldMsg.SelectTower TowerDefs.frost)
+      runner.Dispatch(WorldMsg.PlaceTower(struct (1, 3)))
+      runner.StepN(2, TestData.dt)
+
+      runner.Dispatch(
+        WorldMsg.EnemyMsg(Enemies.EnemyMsg.Spawn TestData.Fixtures.grunt)
+      )
+
+      // 1 s: first shot lands ~0.5 s in; the slow (2 s) must be live.
+      runner.StepN(10, TestData.dt)
+
+      let model = runner.Model
+
+      match model.Enemies.Motions |> CMap.tryGetValue(0<EnemyId>) with
+      | ValueSome mv ->
+        Expect.equal mv.Slow 0.5f "enemy slowed"
+
+        let slowed =
+          model.Enemies.SlowTimers
+          |> Dictionary.tryGetValue(0<EnemyId>)
+
+        Expect.isTrue slowed.IsSome "slow timer running"
+      | ValueNone -> failtest "enemy must exist")
   ]

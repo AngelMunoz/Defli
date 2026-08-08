@@ -23,20 +23,14 @@ open Defli.World
 // ─────────────────────────────────────────────────────────────
 
 [<Struct>]
-type ProjectileMsg =
-  | Spawn of pos: Vector2 * target: int<EnemyId> * damage: int * speed: float32
+type ProjectileMsg = Spawn of spawn: ProjectileSpawn
 
 [<Struct>]
-type ProjectileEvent =
-  | Impact of
-    projectile: int<ProjectileId> *
-    enemy: int<EnemyId> *
-    damage: int *
-    pos: Vector2
+type ProjectileEvent = Impact of impact: ProjectileImpact
 
 type ProjectilesModel() =
   member val Rows = CMap.empty<int<ProjectileId>, ProjectileRow> with get, set
-  member val NextId = 0 with get, set
+  member val NextId = 0<ProjectileId> with get, set
 
 module Projectiles =
 
@@ -51,17 +45,19 @@ module Projectiles =
     (model: ProjectilesModel)
     : struct (ProjectilesModel * ProjectileEvent[]) =
     match msg with
-    | Spawn(pos, target, damage, speed) ->
-      let pid = model.NextId * 1<ProjectileId>
-      model.NextId <- model.NextId + 1
+    | Spawn spawn ->
+      let pid = model.NextId
+      model.NextId <- model.NextId + 1<ProjectileId>
 
       model.Rows
       |> CMap.addOrUpdate pid {
-        Pos = pos
-        TargetEnemy = target
-        Damage = damage
-        Speed = speed
+        Pos = spawn.Pos
+        TargetEnemy = spawn.TargetEnemy
+        Damage = spawn.Damage
+        Speed = spawn.Speed
         Lifetime = lifetime
+        SlowFactor = spawn.SlowFactor
+        SlowSeconds = spawn.SlowSeconds
       }
 
       model, Array.empty
@@ -107,7 +103,16 @@ module Projectiles =
             if isNull events then
               events <- ResizeArray()
 
-            events.Add(Impact(pid, row.TargetEnemy, row.Damage, row.Pos))
+            events.Add(
+              Impact {
+                Projectile = pid
+                Enemy = row.TargetEnemy
+                Damage = row.Damage
+                Pos = row.Pos
+                SlowFactor = row.SlowFactor
+                SlowSeconds = row.SlowSeconds
+              }
+            )
 
             if isNull removes then
               removes <- ResizeArray()

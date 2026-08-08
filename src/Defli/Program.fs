@@ -22,6 +22,8 @@ let main _ =
     |> Program.withSubscription Application.subscribe
     |> Program.withTick Tick
     |> Program.withRenderer(fun () -> Renderer2D.create Application.view)
+    |> Program.withRenderer(fun () ->
+      Renderer2D.createWith Renderer2DConfig.noClear Application.hudView)
 
   let game = new RaylibGame<Model, Msg>(program)
   game.Run()

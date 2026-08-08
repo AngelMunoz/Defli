@@ -25,11 +25,10 @@ open Defli.World
 // ─────────────────────────────────────────────────────────────
 
 [<Struct>]
-type TowerMsg = Place of cell: struct (int * int) * def: TowerDef
+type TowerMsg = Place of struct (struct (int * int) * TowerDef)
 
 [<Struct>]
-type TowerEvent =
-  | Fired of tower: int<TowerId> * enemy: int<EnemyId> * damage: int
+type TowerEvent = Fired of shot: TowerShot
 
 type TowersModel() =
   member val Statics = CMap.empty<int<TowerId>, TowerStatic> with get, set
@@ -38,7 +37,8 @@ type TowersModel() =
   member val CellIndex =
     CMap.empty<struct (int * int), int<TowerId>> with get, set
 
-  member val NextId = 0 with get, set
+  /// Tagged from the start — ids never pass through a plain int.
+  member val NextId = 0<TowerId> with get, set
 
 module Towers =
 
@@ -52,8 +52,8 @@ module Towers =
     : struct (TowersModel * TowerEvent[]) =
     match msg with
     | Place(cell, def) ->
-      let tid = model.NextId * 1<TowerId>
-      model.NextId <- model.NextId + 1
+      let tid = model.NextId
+      model.NextId <- model.NextId + 1<TowerId>
 
       Transaction.run(fun () ->
         model.Statics |> CMap.addOrUpdate tid { Def = def; Cell = cell }
@@ -79,13 +79,14 @@ module Towers =
     for KeyValueV(tid, s) in model.Statics |> AMap.getValue do
       let center = Cells.center s.Cell cellSize
       let rangeWorld = float32 s.Def.Range * cellSize.X
+      let runtimes = model.Runtimes |> AMap.tryFind tid
+      let targetA = runtimes |> AVal.map(ValueOption.bind _.Target)
 
-      let runtime = model.Runtimes |> CMap.tryGetValue tid
+      let cooldownA =
+        runtimes
+        |> AVal.map(ValueOption.map _.Cooldown >> ValueOption.defaultValue 0f)
 
-      let cooldown =
-        runtime
-        |> ValueOption.map(fun r -> r.Cooldown)
-        |> ValueOption.defaultValue 0f
+      let cooldown = cooldownA |> AVal.getValue
 
       let cooldown' = max 0f (cooldown - dt)
 
@@ -118,7 +119,15 @@ module Towers =
           if isNull events then
             events <- ResizeArray()
 
-          events.Add(Fired(tid, eid, s.Def.Damage))
+          events.Add(
+            Fired {
+              Tower = tid
+              Enemy = eid
+              Damage = s.Def.Damage
+              SlowFactor = s.Def.SlowFactor
+              SlowSeconds = s.Def.SlowSeconds
+            }
+          )
 
           model.Runtimes
           |> CMap.addOrUpdate tid {
@@ -129,7 +138,7 @@ module Towers =
           model.Runtimes
           |> CMap.addOrUpdate tid { Cooldown = 0f; Target = ValueNone }
       else
-        let target = runtime |> ValueOption.bind(fun r -> r.Target)
+        let target = targetA |> AVal.getValue
 
         model.Runtimes
         |> CMap.addOrUpdate tid {

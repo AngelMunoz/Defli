@@ -21,11 +21,23 @@ type ProjectileId
 // ─────────────────────────────────────────────────────────────
 
 module Layers =
+
+  [<Literal>]
   let Ground = 0<Mibo.Elmish.Graphics2D.RenderLayer>
+
+  [<Literal>]
   let Path = 1<Mibo.Elmish.Graphics2D.RenderLayer>
+
+  [<Literal>]
   let Entities = 2<Mibo.Elmish.Graphics2D.RenderLayer>
+
+  [<Literal>]
   let Projectiles = 3<Mibo.Elmish.Graphics2D.RenderLayer>
+
+  [<Literal>]
   let Effects = 4<Mibo.Elmish.Graphics2D.RenderLayer>
+
+  [<Literal>]
   let Hud = 10<Mibo.Elmish.Graphics2D.RenderLayer>
 
 // ─────────────────────────────────────────────────────────────
@@ -234,6 +246,10 @@ type TowerDef = {
   /// Head sprite name in the Tiles sheet (drawn over turretBaseA).
   Sprite: string
   TargetPolicy: TargetPolicy
+  /// Slow applied by this tower's projectiles: 1 = no slow, < 1 = the
+  /// enemy's speed factor for SlowSeconds (frost tower).
+  SlowFactor: float32
+  SlowSeconds: float32
 }
 
 module TowerDefs =
@@ -248,9 +264,27 @@ module TowerDefs =
     ProjectileSpeed = 240f
     Sprite = "rocket_pod_single"
     TargetPolicy = TargetPolicy.First
+    SlowFactor = 1f
+    SlowSeconds = 0f
   }
 
-  let all = [| arrow |]
+  /// Frost — low damage, slows the target's movement (Motions.Slow
+  /// factor + expiry timer, consumed by the Enemies movement tick).
+  let frost = {
+    Key = "frost"
+    Name = "Frost"
+    Cost = 80
+    Range = 2
+    Damage = 4
+    FireRate = 1.5f
+    ProjectileSpeed = 200f
+    Sprite = "rocket_pod_dual"
+    TargetPolicy = TargetPolicy.Weakest
+    SlowFactor = 0.5f
+    SlowSeconds = 2f
+  }
+
+  let all = [| arrow; frost |]
 
 /// Per-tower components (rows in the Towers sub-system's CMaps).
 /// Static vs runtime is the write-frequency grouping: Statics is written
@@ -279,6 +313,51 @@ type ProjectileRow = {
   Damage: int
   Speed: float32
   Lifetime: float32
+  /// Slow applied on impact (1 = none; copied from the TowerDef).
+  SlowFactor: float32
+  SlowSeconds: float32
+}
+
+/// Spawn intent for a projectile — the shot's definitional content
+/// (the row minus the id and the lifetime, both system-owned: the id
+/// is assigned at spawn, the lifetime is a fixed constant).
+[<Struct>]
+type ProjectileSpawn = {
+  Pos: Vector2
+  TargetEnemy: int<EnemyId>
+  Damage: int
+  Speed: float32
+  SlowFactor: float32
+  SlowSeconds: float32
+}
+
+/// A tower shot (TowerEvent.Fired payload) — what left the barrel.
+[<Struct>]
+type TowerShot = {
+  Tower: int<TowerId>
+  Enemy: int<EnemyId>
+  Damage: int
+  SlowFactor: float32
+  SlowSeconds: float32
+}
+
+/// A projectile impact (ProjectileEvent.Impact payload) — what hit.
+[<Struct>]
+type ProjectileImpact = {
+  Projectile: int<ProjectileId>
+  Enemy: int<EnemyId>
+  Damage: int
+  Pos: Vector2
+  SlowFactor: float32
+  SlowSeconds: float32
+}
+
+/// A slow application (EnemyMsg.ApplySlow payload) — factor + expiry.
+[<Struct>]
+type SlowApply = {
+  Enemy: int<EnemyId>
+  Factor: float32
+  Seconds: float32
 }
 
 /// Render row of the world-owned Homing projection

@@ -31,6 +31,9 @@ type WorldMsg =
   | ProjectilesMsg of msgP: Projectiles.ProjectileMsg
   | VfxMsg of msgV: Vfx.VfxMsg
   | EconomyMsg of msgEC: Economy.EconomyMsg
+  | CameraMsg of msgC: Camera.CameraMsg
+  /// Player switched the tower kind to place (cold path).
+  | SelectTower of def: TowerDef
 
 type WorldModel() =
   member val Config: WorldConfig = Unchecked.defaultof<_> with get, set
@@ -42,6 +45,11 @@ type WorldModel() =
   member val Projectiles = Projectiles.Projectiles.init() with get, set
   member val Vfx = Vfx.Vfx.init() with get, set
   member val Economy = Economy.Economy.init WorldConfig.defaults with get, set
+  /// Camera sub-system (headless — the view builds the raylib camera).
+  member val Camera = Camera.Camera.init Vector2.Zero with get, set
+  /// Tower kind the next placement uses — a CVal because the
+  /// PlacementPreview projection joins on it (cold path writes).
+  member val SelectedTower = CVal.create TowerDefs.arrow with get, set
   member val Projections: Projections = Unchecked.defaultof<_> with get, set
   /// Hover cell CVal — UI state written by the shell on MouseMoved;
   /// the world projections (PlacementPreview/RangeRing) join on it.
@@ -53,11 +61,20 @@ module World =
   open AdaptiveSlop.Core
 
   let init(cfg: WorldConfig) : WorldModel =
-    let model = WorldModel()
-    model.Config <- cfg
-    model.Map <- MapModel.create cfg
-    model.Spawning <- Spawning.Spawning.init cfg.Seed
-    model.Economy <- Economy.Economy.init cfg
+    let model =
+      WorldModel(
+        Config = cfg,
+        Map = MapModel.create cfg,
+        Spawning = Spawning.Spawning.init cfg.Seed,
+        Economy = Economy.Economy.init cfg,
+        Camera =
+          Camera.Camera.init(
+            Vector2(
+              float32(cfg.GridCols * Tiles.TileSize),
+              float32(cfg.GridRows * Tiles.TileSize)
+            )
+          )
+      )
 
     model.Projections <-
       Projections(
@@ -66,7 +83,8 @@ module World =
         model.Projectiles,
         model.Economy,
         MapModel.buildableGrid model.Map,
-        model.HoverCell
+        model.HoverCell,
+        model.SelectedTower
       )
 
     model
@@ -92,7 +110,12 @@ module World =
           Cmd.ofMsg(EconomyMsg(Economy.EarnGold reward))
           Cmd.ofMsg(EnemyMsg(Enemies.Despawn eid))
           Cmd.ofMsg(VfxMsg(Vfx.Burst(Vfx.VfxKind.DeathPoof, pos)))
-        | Enemies.ReachedBase _ -> Cmd.ofMsg(EconomyMsg Economy.LoseLife)
+        | Enemies.ReachedBase _ ->
+          let basePos = Cells.center model.Map.BaseCell (cellSize model)
+
+          Cmd.ofMsg(EconomyMsg Economy.LoseLife)
+          Cmd.ofMsg(VfxMsg(Vfx.Burst(Vfx.VfxKind.BaseHit, basePos)))
+          Cmd.ofMsg(CameraMsg(Camera.Shake 8f))
     |]
 
   let private translateSpawnEvents
@@ -135,16 +158,28 @@ module World =
     [|
       for ev in events do
         match ev with
-        | Towers.Fired(tid, eid, damage) ->
+        | Towers.Fired shot ->
           let struct (pos, speed) =
             model.Towers.Statics
-            |> CMap.tryGetValue tid
+            |> CMap.tryGetValue shot.Tower
             |> ValueOption.map(fun s ->
               struct (Cells.center s.Cell (cellSize model),
                       s.Def.ProjectileSpeed))
             |> ValueOption.defaultValue struct (Vector2.Zero, 0f)
 
-          Cmd.ofMsg(ProjectilesMsg(Projectiles.Spawn(pos, eid, damage, speed)))
+          Cmd.ofMsg(
+            ProjectilesMsg(
+              Projectiles.Spawn {
+                Pos = pos
+                TargetEnemy = shot.Enemy
+                Damage = shot.Damage
+                Speed = speed
+                SlowFactor = shot.SlowFactor
+                SlowSeconds = shot.SlowSeconds
+              }
+            )
+          )
+
           Cmd.ofMsg(VfxMsg(Vfx.Burst(Vfx.VfxKind.Muzzle, pos)))
     |]
 
@@ -154,9 +189,21 @@ module World =
     [|
       for ev in events do
         match ev with
-        | Projectiles.Impact(_, eid, damage, pos) ->
-          Cmd.ofMsg(EnemyMsg(Enemies.ApplyDamage(eid, damage)))
-          Cmd.ofMsg(VfxMsg(Vfx.Burst(Vfx.VfxKind.Impact, pos)))
+        | Projectiles.Impact impact ->
+          Cmd.ofMsg(EnemyMsg(Enemies.ApplyDamage(impact.Enemy, impact.Damage)))
+
+          if impact.SlowFactor < 1f then
+            Cmd.ofMsg(
+              EnemyMsg(
+                Enemies.ApplySlow {
+                  Enemy = impact.Enemy
+                  Factor = impact.SlowFactor
+                  Seconds = impact.SlowSeconds
+                }
+              )
+            )
+
+          Cmd.ofMsg(VfxMsg(Vfx.Burst(Vfx.VfxKind.Impact, impact.Pos)))
     |]
 
   /// Router — dispatch + translate only. No game logic.
@@ -194,6 +241,7 @@ module World =
           (model.Enemies.Positions |> AMap.getValue)
 
       Vfx.Vfx.tick dt model.Vfx
+      Camera.Camera.tick dt model.Camera
       Diagnostics.tickEnd t0 model.Diag aliveCount model.Spawning.Queue.Count
 
       model,
@@ -216,7 +264,7 @@ module World =
     | PlaceTower cell ->
       // Cold path — the router builds the placement query per message
       // (closure query record): buildable tile, occupancy, gold.
-      let def = TowerDefs.arrow
+      let def = AVal.getValue model.SelectedTower
       let struct (cx, cy) = cell
 
       let tileOk = MapModel.isBuildable cx cy model.Map
@@ -231,6 +279,14 @@ module World =
         Cmd.batch [|
           Cmd.ofMsg(TowersMsg(Towers.Place(cell, def)))
           Cmd.ofMsg(EconomyMsg(Economy.SpendGold def.Cost))
+          Cmd.ofMsg(
+            VfxMsg(
+              Vfx.Burst(
+                Vfx.VfxKind.Placement,
+                Cells.center cell (cellSize model)
+              )
+            )
+          )
         |]
       else
         model, Cmd.none
@@ -261,65 +317,51 @@ module World =
     | EconomyMsg m ->
       Economy.Economy.update m model.Economy
       model, Cmd.none
+    | CameraMsg m ->
+      model.Camera <- Camera.Camera.update m model.Camera
+      model, Cmd.none
+    | SelectTower def ->
+      model.SelectedTower |> CVal.set def
+      model, Cmd.none
 
-  // ── HUD (minimal, inline — full HUD lands in Phase 4) ──
-
-  let private hudView
-    (ctx: GameContext)
+  // ── Placement preview + range ring (hover overlays) ──
+  let inline drawOutline
+    size
+    (color: Mibo.Color)
     (model: WorldModel)
     (buffer: RenderBuffer2D)
     =
-    let font = Raylib.GetFontDefault()
-    let gold = AVal.getValue model.Economy.Gold
-    let lives = AVal.getValue model.Economy.Lives
-    let banner = AVal.getValue model.Waves.Banner
+    let cell = model.HoverCell |> AVal.getValue
 
-    buffer
-      .text(
-        font,
-        $"Gold: %d{gold}   Lives: %d{lives}   %s{banner}",
-        Vector2(12f, 10f),
-        22f,
-        layer = Layers.Hud
-      )
-      .drop()
+    cell
+    |> ValueOption.iter(fun c ->
+      let struct (hx, hy) = c
+      let p = CellGrid2D.getWorldPos hx hy (MapModel.terrain model.Map)
 
-    if AVal.getValue model.Economy.GameOver then
       buffer
-        .text(font, "GAME OVER", Vector2(480f, 340f), 48f, layer = Layers.Hud)
-        .drop()
-
-  // ── Placement preview + range ring (hover overlays) ──
+        .rectOutline(
+          p.X,
+          p.Y,
+          size,
+          size,
+          color,
+          thickness = 2f,
+          layer = Layers.Effects
+        )
+        .drop())
 
   let private hoverOverlays (model: WorldModel) (buffer: RenderBuffer2D) =
     let size = float32 Tiles.TileSize
 
     // Placement preview: the hovered cell's build status.
-    let drawOutline(color: Mibo.Color) =
-      match model.HoverCell.Value with
-      | ValueSome c ->
-        let struct (hx, hy) = c
-        let p = CellGrid2D.getWorldPos hx hy (MapModel.terrain model.Map)
-
-        buffer
-          .rectOutline(
-            p.X,
-            p.Y,
-            size,
-            size,
-            color,
-            thickness = 2f,
-            layer = Layers.Hud
-          )
-          .drop()
-      | ValueNone -> ()
 
     match AVal.getValue model.Projections.PlacementPreview with
     | PlacementStatus.Hidden -> ()
-    | PlacementStatus.Blocked -> drawOutline Mibo.Color.Red
-    | PlacementStatus.Affordable -> drawOutline Mibo.Color.Green
+    | PlacementStatus.Blocked -> drawOutline size Mibo.Color.Red model buffer
+    | PlacementStatus.Affordable ->
+      drawOutline size Mibo.Color.Green model buffer
     | PlacementStatus.TooExpensive ->
-      drawOutline(Mibo.Color.rgb 255uy 210uy 0uy)
+      drawOutline size (Mibo.Color.rgb 255uy 210uy 0uy) model buffer
 
     // Range ring: hovering an own tower shows its range circle.
     let rangeRing = AVal.getValue model.Projections.RangeRing
@@ -343,11 +385,14 @@ module World =
 
   let view (ctx: GameContext) (model: WorldModel) (buffer: RenderBuffer2D) =
     let size = cellSize model
+    let viewport = Vector2(float32 ctx.WindowWidth, float32 ctx.WindowHeight)
 
-    // No Camera2D yet — the visible rect is the full window in world
-    // space (grid origin is 0,0). Phase 4 swaps in the camera bounds.
-    let visible =
-      Rectangle(0f, 0f, float32 ctx.WindowWidth, float32 ctx.WindowHeight)
+    // Camera block: the subsystem clamps + shakes + records the
+    // underlying camera; everything world-space renders inside; the
+    // HUD renderer (separate noClear pass) owns screen space.
+    Camera.beginFrame model.Camera viewport buffer
+
+    let visible = Camera.cullingBounds model.Camera viewport
 
     Map.view ctx model.Map visible buffer
     Towers.Towers.view ctx model.Towers size buffer
@@ -361,4 +406,45 @@ module World =
 
     Vfx.Vfx.view ctx model.Vfx buffer
     hoverOverlays model buffer
-    hudView ctx model buffer
+
+    buffer.endCamera(layer = Layers.Effects).drop()
+
+  /// Screen-space HUD pass (own renderer, noClear): reads the avals
+  /// transiently at view time — no view caches.
+  let hudView (ctx: GameContext) (model: WorldModel) (buffer: RenderBuffer2D) =
+    let font = Raylib.GetFontDefault()
+    let gold = AVal.getValue model.Economy.Gold
+    let lives = AVal.getValue model.Economy.Lives
+    let banner = AVal.getValue model.Waves.Banner
+    let def = AVal.getValue model.SelectedTower
+
+    buffer
+      .text(
+        font,
+        $"Gold: %d{gold}   Lives: %d{lives}   %s{banner}   Tower: %s{def.Name} (1/2)",
+        Vector2(12f, 10f),
+        22f,
+        layer = Layers.Hud
+      )
+      .drop()
+
+    buffer
+      .text(
+        font,
+        "WASD/arrows or middle-drag: pan   wheel: zoom   Home: reset",
+        Vector2(12f, float32 ctx.WindowHeight - 30f),
+        16f,
+        layer = Layers.Hud
+      )
+      .drop()
+
+    if AVal.getValue model.Economy.GameOver then
+      buffer
+        .text(
+          font,
+          "GAME OVER — press R to restart",
+          Vector2(430f, 360f),
+          40f,
+          layer = Layers.Hud
+        )
+        .drop()

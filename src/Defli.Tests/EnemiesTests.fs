@@ -35,7 +35,7 @@ let tests =
       Expect.equal (viewsCount m') 1 "views"
 
       Expect.equal
-        ((m'.Positions |> AMap.getValue)[0 * 1<EnemyId>])
+        ((m'.Positions |> AMap.getValue)[0<EnemyId>])
         map.Path[0]
         "starts at spawn")
 
@@ -46,7 +46,7 @@ let tests =
         Enemies.update (EnemyMsg.Spawn Fixtures.tank) m map.Path
 
       // All four rows share the same key.
-      let eid = 0 * 1<EnemyId>
+      let eid = 0<EnemyId>
       Expect.isTrue ((m'.Healths |> CMap.tryGetValue eid).IsSome) "health"
       Expect.isTrue ((m'.Motions |> CMap.tryGetValue eid).IsSome) "motion"
       Expect.isTrue ((m'.Positions |> CMap.tryGetValue eid).IsSome) "position"
@@ -58,7 +58,7 @@ let tests =
       let struct (m', _) =
         Enemies.update (EnemyMsg.Spawn Fixtures.grunt) m map.Path
 
-      let eid = 0 * 1<EnemyId>
+      let eid = 0<EnemyId>
 
       let struct (m2, events) =
         Enemies.update (EnemyMsg.ApplyDamage(eid, 10)) m' map.Path
@@ -90,7 +90,7 @@ let tests =
         Enemies.update (EnemyMsg.Spawn Fixtures.runner) m map.Path
 
       let struct (m2, _) =
-        Enemies.update (EnemyMsg.Despawn(0 * 1<EnemyId>)) m' map.Path
+        Enemies.update (EnemyMsg.Despawn(0<EnemyId>)) m' map.Path
 
       Expect.equal ((m2.Healths |> AMap.getValue).Count) 0 "healths"
       Expect.equal ((m2.Motions |> AMap.getValue).Count) 0 "motions"
@@ -105,7 +105,7 @@ let tests =
       let struct (m', _) =
         Enemies.update (EnemyMsg.Spawn Fixtures.runner) m map.Path
 
-      let eid = 0 * 1<EnemyId>
+      let eid = 0<EnemyId>
 
       // Runner: 90 px/s; 1 second moves ~90px (waypoint 0→1 is 448px).
       let struct (m2, _) = Enemies.tick 1.0f m' map.Path
@@ -121,7 +121,7 @@ let tests =
       let struct (m', _) =
         Enemies.update (EnemyMsg.Spawn Fixtures.runner) m map.Path
 
-      let eid = 0 * 1<EnemyId>
+      let eid = 0<EnemyId>
 
       // Path is 29 cells = 1856 px; runner at 90 px/s needs ~21s.
       let mutable m2 = m'
@@ -150,10 +150,17 @@ let tests =
       let struct (m', _) =
         Enemies.update (EnemyMsg.Spawn Fixtures.grunt) m map.Path
 
-      let eid = 0 * 1<EnemyId>
+      let eid = 0<EnemyId>
 
       let struct (m2, _) =
-        Enemies.update (EnemyMsg.ApplySlow(eid, 0.5f, 1.0f)) m' map.Path
+        Enemies.update
+          (EnemyMsg.ApplySlow {
+            Enemy = eid
+            Factor = 0.5f
+            Seconds = 1.0f
+          })
+          m'
+          map.Path
 
       match m2.Motions |> CMap.tryGetValue eid with
       | ValueSome mv -> Expect.equal mv.Slow 0.5f "slowed"
@@ -174,7 +181,7 @@ let tests =
       let struct (m', _) =
         Enemies.update (EnemyMsg.Spawn Fixtures.flier) m map.Path
 
-      let eid = 0 * 1<EnemyId>
+      let eid = 0<EnemyId>
       let spawn = map.Path[0]
       let basePos = map.Path[map.Path.Length - 1]
       let flyDist = Vector2.Distance(spawn, basePos)
@@ -202,7 +209,7 @@ let tests =
       let struct (m', _) =
         Enemies.update (EnemyMsg.Spawn Fixtures.flier) m map.Path
 
-      let eid = 0 * 1<EnemyId>
+      let eid = 0<EnemyId>
       let spawn = map.Path[0]
       let basePos = map.Path[map.Path.Length - 1]
       let flyDist = Vector2.Distance(spawn, basePos)

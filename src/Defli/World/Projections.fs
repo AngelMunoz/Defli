@@ -16,11 +16,11 @@ open Defli.World.Systems
 //   RangeRing (#10)      — hover cell × Towers.CellIndex/Statics
 //                          (AVal.bind UI-state join)
 //   PlacementPreview (#5)— hover cell × Towers.CellIndex ×
-//                          Economy.Gold (per-hover map2 fan-in;
-//                          the full-tile filterA variant is exactly
-//                          the wide fan-out the join assessment
-//                          flagged — the per-hover fan-in gives the
-//                          same UX with a shallow graph)
+//                          Economy.Gold × SelectedTower (per-hover
+//                          map3 fan-in; the full-tile filterA variant
+//                          is exactly the wide fan-out the join
+//                          assessment flagged — the per-hover fan-in
+//                          gives the same UX with a shallow graph)
 // ─────────────────────────────────────────────────────────────
 
 [<Sealed>]
@@ -31,7 +31,8 @@ type Projections
     projectiles: Projectiles.ProjectilesModel,
     economy: Economy.EconomyModel,
     buildable: CellGrid2D<MapTile>,
-    hover: aval<struct (int * int) voption>
+    hover: aval<struct (int * int) voption>,
+    selected: aval<TowerDef>
   ) =
 
   /// #3 Homing — one aval per projectile tracking its target's live
@@ -83,12 +84,13 @@ type Projections
 
           towers.CellIndex
           |> AMap.tryFind cellKey
-          |> AVal.map2
-            (fun gold occupied ->
+          |> AVal.map3
+            (fun gold def occupied ->
               if ValueOption.isSome occupied then
                 PlacementStatus.Blocked
-              elif gold >= TowerDefs.arrow.Cost then
+              elif gold >= def.Cost then
                 PlacementStatus.Affordable
               else
                 PlacementStatus.TooExpensive)
-            economy.Gold)
+            economy.Gold
+            selected)

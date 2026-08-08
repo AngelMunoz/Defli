@@ -30,13 +30,13 @@ open Defli.World
 [<Struct>]
 type EnemyMsg =
   | Spawn of def: EnemyDef
-  | ApplyDamage of enemy: int<EnemyId> * amount: int
-  | ApplySlow of enemy: int<EnemyId> * factor: float32 * seconds: float32
+  | ApplyDamage of applyDamage: struct (int<EnemyId> * int)
+  | ApplySlow of slow: SlowApply
   | Despawn of enemy: int<EnemyId>
 
 [<Struct>]
 type EnemyEvent =
-  | Killed of enemy: int<EnemyId> * reward: int
+  | Killed of killed: struct (int<EnemyId> * int)
   | ReachedBase of enemy: int<EnemyId>
 
 type EnemiesModel() =
@@ -44,7 +44,8 @@ type EnemiesModel() =
   member val Motions = CMap.empty<int<EnemyId>, Motion> with get, set
   member val Positions = CMap.empty<int<EnemyId>, Vector2> with get, set
   member val Defs = CMap.empty<int<EnemyId>, EnemyDef> with get, set
-  member val NextId = 0 with get, set
+  /// Tagged from the start — ids never pass through a plain int.
+  member val NextId = 0<EnemyId> with get, set
   /// Slow expiry timers (sim-only, plain — not adaptive).
   member val SlowTimers = Dictionary<int<EnemyId>, float32>() with get, set
   // Own projections (own maps only) — built in Enemies.init.
@@ -115,8 +116,8 @@ module Enemies =
     : struct (EnemiesModel * EnemyEvent[]) =
     match msg with
     | Spawn def ->
-      let eid = model.NextId * 1<EnemyId>
-      model.NextId <- model.NextId + 1
+      let eid = model.NextId
+      model.NextId <- model.NextId + 1<EnemyId>
 
       Transaction.run(fun () ->
         model.Healths |> CMap.addOrUpdate eid { Hp = def.Hp; MaxHp = def.Hp }
@@ -146,11 +147,13 @@ module Enemies =
         else
           model, Array.empty
       | _ -> model, Array.empty
-    | ApplySlow(eid, factor, seconds) ->
-      match model.Motions |> CMap.tryGetValue eid with
+    | ApplySlow slow ->
+      match model.Motions |> CMap.tryGetValue slow.Enemy with
       | ValueSome mv ->
-        model.Motions |> CMap.addOrUpdate eid { mv with Slow = factor }
-        model.SlowTimers[eid] <- seconds
+        model.Motions
+        |> CMap.addOrUpdate slow.Enemy { mv with Slow = slow.Factor }
+
+        model.SlowTimers[slow.Enemy] <- slow.Seconds
         model, Array.empty
       | ValueNone -> model, Array.empty
     | Despawn eid ->

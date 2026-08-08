@@ -205,9 +205,8 @@ module Map =
   let inline private grassVariant (x: int) (y: int) =
     Tiles.groundGrass[(x * 7 + y * 13) % 3]
 
-  /// `visible` is the camera's world-space view rect. Iteration is
-  /// culled to it (the fixed screen passes the full window until a
-  /// Camera2D lands in Phase 4).
+  /// `visible` is the camera's world-space view rect (camera bounds
+  /// from the Camera sub-system — iterVisible culls to it).
   let view
     (ctx: GameContext)
     (model: MapModel)

@@ -15,7 +15,7 @@ let private cfg = TestData.Fixtures.cfg
 let private map = MapModel.create cfg
 let private model() = Projectiles.init()
 
-let private target = 0 * 1<EnemyId>
+let private target = 0<EnemyId>
 
 /// A transient Positions-shaped dict with one enemy at pos.
 let private positionsAt(pos: Vector2) =
@@ -25,7 +25,16 @@ let private positionsAt(pos: Vector2) =
 
 let private spawnAt (m: ProjectilesModel) (pos: Vector2) =
   let struct (m', _) =
-    Projectiles.update (ProjectileMsg.Spawn(pos, target, 5, 100f)) m
+    Projectiles.update
+      (ProjectileMsg.Spawn {
+        Pos = pos
+        TargetEnemy = target
+        Damage = 5
+        Speed = 100f
+        SlowFactor = 1f
+        SlowSeconds = 0f
+      })
+      m
 
   m'
 
@@ -34,12 +43,19 @@ let tests =
     testCase "spawn adds a row" (fun () ->
       let struct (m', _) =
         Projectiles.update
-          (ProjectileMsg.Spawn(Vector2.Zero, target, 5, 100f))
+          (ProjectileMsg.Spawn {
+            Pos = Vector2.Zero
+            TargetEnemy = target
+            Damage = 5
+            Speed = 100f
+            SlowFactor = 1f
+            SlowSeconds = 0f
+          })
           (model())
 
       Expect.equal ((m'.Rows |> AMap.getValue).Count) 1 "one row"
 
-      match m'.Rows |> CMap.tryGetValue(0 * 1<ProjectileId>) with
+      match m'.Rows |> CMap.tryGetValue(0<ProjectileId>) with
       | ValueSome row ->
         Expect.equal row.TargetEnemy target "target"
         Expect.equal row.Damage 5 "damage"
@@ -53,7 +69,7 @@ let tests =
       let struct (m2, _) =
         Projectiles.tick 0.1f m (positionsAt(Vector2(50f, 0f)))
 
-      match m2.Rows |> CMap.tryGetValue(0 * 1<ProjectileId>) with
+      match m2.Rows |> CMap.tryGetValue(0<ProjectileId>) with
       | ValueSome row -> Expect.equal row.Pos.X 10f "moved toward target"
       | ValueNone -> failtest "row must exist"
 
@@ -62,10 +78,44 @@ let tests =
         Projectiles.tick 1.0f m2 (positionsAt(Vector2(50f, 0f)))
 
       match events |> Seq.toArray with
-      | [| Impact(pid, eid, damage, _) |] ->
-        Expect.equal pid (0 * 1<ProjectileId>) "projectile id"
-        Expect.equal eid target "enemy id"
-        Expect.equal damage 5 "damage"
+      | [| Impact impact |] ->
+        Expect.equal impact.Projectile (0<ProjectileId>) "projectile id"
+        Expect.equal impact.Enemy target "enemy id"
+        Expect.equal impact.Damage 5 "damage"
+      | _ -> failtest "expected exactly one Impact"
+
+      Expect.equal ((m3.Rows |> AMap.getValue).Count) 0 "removed on impact")
+
+    testCase "spawn carries the slow payload to Impact" (fun () ->
+      // Frost-style shot: slowFactor 0.5 for 2 s.
+      let mutable m = model()
+
+      let struct (m', _) =
+        Projectiles.update
+          (ProjectileMsg.Spawn {
+            Pos = Vector2(10f, 0f)
+            TargetEnemy = target
+            Damage = 4
+            Speed = 200f
+            SlowFactor = 0.5f
+            SlowSeconds = 2f
+          })
+          m
+
+      m <- m'
+
+      let struct (m2, _) =
+        Projectiles.tick 0.01f m (positionsAt(Vector2(50f, 0f)))
+
+      // Enough time to cover the remaining 40 px.
+      let struct (m3, events) =
+        Projectiles.tick 1.0f m2 (positionsAt(Vector2(50f, 0f)))
+
+      match events |> Seq.toArray with
+      | [| Impact impact |] ->
+        Expect.equal impact.Damage 4 "damage"
+        Expect.equal impact.SlowFactor 0.5f "slow factor"
+        Expect.equal impact.SlowSeconds 2f "slow seconds"
       | _ -> failtest "expected exactly one Impact"
 
       Expect.equal ((m3.Rows |> AMap.getValue).Count) 0 "removed on impact")
@@ -108,7 +158,7 @@ let tests =
             enemies
             map.Path
 
-        let eid = 0 * 1<EnemyId>
+        let eid = 0<EnemyId>
         let projectiles = model()
         let projectiles' = spawnAt projectiles (Vector2(0f, 0f))
         let towers = Towers.Towers.init()
@@ -122,7 +172,8 @@ let tests =
             projectiles',
             economy,
             MapModel.buildableGrid map,
-            hover
+            hover,
+            CVal.create TowerDefs.arrow
           )
 
         let rows = projections.Homing |> AMap.getValue

@@ -102,10 +102,13 @@ The measured costs are within the frame budget with large margin.
 dotnet-trace collect --profile gc-verbose --name Defli
 dotnet-trace convert trace.nettrace --format Speedscope -o trace.speedscope
 dotnet fsi tools/analyze-trace.fsx trace.speedscope.json
+dotnet fsi tools/analyze-subtree.fsx trace.speedscope.json
 ```
 
 The analyzer file is `tools/analyze-trace.fsx`. It reproduces all tables in
-this document from a new capture.
+this document from a new capture. `tools/analyze-subtree.fsx` adds the
+microscope pass: per-depth inclusive tables and per-frame subtree
+attribution (same sample-based census semantics).
 
 ## 9. Phase-3 Follow-up (start → wave ~11, 2026-08-07)
 
@@ -149,3 +152,73 @@ Hitch investigation (same session):
 
 Verdict: keep an eye on the allocation rate as entity counts grow, but
 nothing is near the frame budget. We are not dead in the water.
+
+## 10. Phase-4 Trace (start → wave ~10, 2026-08-08)
+
+A 201.3 s capture of the Phase-4 build (camera sub-system, HUD
+renderer, frost tower, keyboard pan). Same method, same census.
+
+| Fact | Value |
+| --- | --- |
+| Game CPU busy time | 1.26 % of wall (2.54 s — 0.21 ms/frame) |
+| AdaptiveSlop busy time | 49.5 % of busy (0.62 % of wall — 0.10 ms/frame) |
+| GC frames in the busy profile | 0 (no PollGC/WriteBarrier samples) |
+| Towers.tick (NEW #1 consumer) | 21.9 % of busy (0.28 % of wall) |
+| Alive-count node pull (World.fs RoomTick) | 17.8 % of busy |
+| Renderer2D (both passes) | 18.8 % of busy |
+| String samples (AssetsService.Texture per frame) | 49 (1.9 %) |
+
+Microscope (per-frame subtree attribution):
+
+- Towers.tick is half adaptive machinery: ~13 % of busy is node
+  GetValue/Recompute plus ~3 % of NODE CONSTRUCTORS on the tick path.
+  Source-verified: `AMap.tryFind` is `new AdaptiveNode(...)` — a fresh
+  node per call. The per-tower-per-tick tryFind pattern rebuilds nodes
+  every frame; each GetValue re-reads the map and re-allocates. This
+  is the assessment's allocation drip, now on the Towers hot path.
+- The Alive-count node (`Alive |> AMap.count |> AVal.getValue`,
+  RoomTick) is still pulled per frame: 17.8 % of busy, including the
+  whole Alive chain drain (ElementMapNode 16.6 %, buildViews 11.1 %).
+  This is lever #1 from §5 — the transient `.Count` flattening is the
+  documented fix and is not in place here.
+- Homing join: 8.5 % of busy, pulled by Projectiles.view — linear in
+  projectiles, expected.
+- Enemies.tick itself (the real sim work): 1.3 % of busy.
+
+### 10.1 Does more busy work dilute the adaptive share?
+
+Intuitively yes — and the busy-share numbers look like it (64.9 % →
+49.5 % as the game got busier). But this is a MIX EFFECT, not an
+improvement:
+
+| Capture | Busy (% wall) | AdaptiveSlop busy-share | AdaptiveSlop wall-share |
+| --- | --- | --- | --- |
+| Phase 1 (37 s) | 0.75 % | 64.9 % | 0.49 % |
+| Wave 28 (60 s) | 6.1 % | 5.3 % (flattening REFACTOR) | 0.30 % |
+| Start→wave 11 | 0.8 % | 46.9 % | 0.40 % |
+| Phase 3 (247 s) | 0.9 % | 53.6 % | 0.50 % |
+| Phase 4 (201 s) | 1.3 % | 49.5 % | 0.62 % |
+
+Facts:
+
+- The busy-share is a ratio of mixes: "of the CPU I burn, how much is
+  adaptive". When the game is busier for OTHER reasons (bigger waves:
+  more sprite commands, more sim rows), the same absolute adaptive
+  cost is a smaller fraction. The ratio flattens by arithmetic.
+- The absolute wall-share — the metric that matters — is FLAT at
+  ~0.5 % with a slight upward drift (0.49 → 0.62 %) as the game gained
+  projections. It did not flatten toward zero.
+- The one big drop (wave 28: 64.9 % → 5.3 % of busy) was the
+  transient-read flattening refactor (§5 lever #1), not natural
+  dilution.
+- Mechanism: adaptive cost is linear in the elements of sources that
+  change per frame. Rendering and sim are also linear in entities but
+  with a bigger constant (draw commands, sorting). At larger entity
+  counts the adaptive fraction shrinks RELATIVELY while the absolute
+  ms/frame stays identical.
+
+Consequence: "more busy work dilutes the share" is true but does not
+answer "will adaptive data bite us at scale". The answer there is
+still the linear growth + the per-element allocation drip. Watch the
+absolute ms/frame and the allocation samples per entity — not the
+ratio.

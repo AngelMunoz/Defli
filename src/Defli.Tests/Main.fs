@@ -13,6 +13,9 @@ let allTests =
     WavesTests.tests
     EconomyTests.tests
     ProjectionTests.tests
+    TowersTests.tests
+    ProjectilesTests.tests
+    DiagnosticsTests.tests
     RouterTests.tests
   ]
 

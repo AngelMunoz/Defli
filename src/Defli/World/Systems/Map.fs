@@ -129,12 +129,7 @@ module Map =
   let private grassVariant (x: int) (y: int) =
     Tiles.groundGrass[(x * 7 + y * 13) % 3]
 
-  let view
-    (ctx: GameContext)
-    (model: MapModel)
-    (hoverCell: struct (int * int) voption)
-    (buffer: RenderBuffer2D)
-    =
+  let view (ctx: GameContext) (model: MapModel) (buffer: RenderBuffer2D) =
     let assets = GameContext.getService<IAssets> ctx
     let tex = assets.Texture Tiles.SheetPath
     let size = float32 Tiles.TileSize
@@ -183,20 +178,5 @@ module Map =
       )
       .drop()
 
-    // Hover highlight (placement preview in later phases).
-    match hoverCell with
-    | ValueSome(struct (hx, hy)) ->
-      let p = CellGrid2D.getWorldPos hx hy model.Grid
-
-      buffer
-        .rectOutline(
-          p.X,
-          p.Y,
-          size,
-          size,
-          Color.White,
-          thickness = 2f,
-          layer = Layers.Hud
-        )
-        .drop()
-    | ValueNone -> ()
+    // Hover highlight + range ring live in World.view (they join
+    // projections — see hoverOverlays).

@@ -173,3 +173,100 @@ type EnemyView = {
   Slow: float32
   PathIndex: int
 }
+
+// ─────────────────────────────────────────────────────────────
+// Tower definitions & components
+// ─────────────────────────────────────────────────────────────
+
+[<Struct>]
+type TowerDef = {
+  Key: string
+  Name: string
+  Cost: int
+  /// Range in grid cells (Chebyshev ring narrowed by exact distance).
+  Range: int
+  Damage: int
+  /// Shots per second.
+  FireRate: float32
+  ProjectileSpeed: float32
+  /// Head sprite name in the Tiles sheet (drawn over turretBaseA).
+  Sprite: string
+}
+
+module TowerDefs =
+
+  let arrow = {
+    Key = "arrow"
+    Name = "Arrow"
+    Cost = 50
+    Range = 3
+    Damage = 12
+    FireRate = 2f
+    ProjectileSpeed = 240f
+    Sprite = "rocket_pod_single"
+  }
+
+  let all = [| arrow |]
+
+/// Per-tower components (rows in the Towers sub-system's CMaps).
+/// Static vs runtime is the write-frequency grouping: Statics is written
+/// once (placement), Runtimes every tick (cooldown/target).
+[<Struct>]
+type TowerStatic = {
+  Def: TowerDef
+  Cell: struct (int * int)
+}
+
+[<Struct>]
+type TowerRuntime = {
+  Cooldown: float32
+  Target: int<EnemyId> voption
+}
+
+// ─────────────────────────────────────────────────────────────
+// Projectiles
+// ─────────────────────────────────────────────────────────────
+
+/// One in-flight shot (a row in Projectiles.Rows).
+[<Struct>]
+type ProjectileRow = {
+  Pos: Vector2
+  TargetEnemy: int<EnemyId>
+  Damage: int
+  Speed: float32
+  Lifetime: float32
+}
+
+/// Render row of the world-owned Homing projection
+/// (Projectiles.Rows × Enemies.Positions).
+[<Struct>]
+type HomingView = {
+  Pos: Vector2
+  TargetPos: Vector2
+}
+
+// ─────────────────────────────────────────────────────────────
+// Placement preview (hover highlight state)
+// ─────────────────────────────────────────────────────────────
+
+[<Struct>]
+type PlacementStatus =
+  | Hidden
+  | Blocked
+  | Affordable
+  | TooExpensive
+
+// ─────────────────────────────────────────────────────────────
+// Cell helpers
+// ─────────────────────────────────────────────────────────────
+
+module Cells =
+
+  /// World-space center of a grid cell (grid origin is Zero,
+  /// cell size is uniform — see MapModel.create).
+  let center (cell: struct (int * int)) (cellSize: Vector2) =
+    let struct (x, y) = cell
+    Vector2(
+      float32 x * cellSize.X + cellSize.X / 2f,
+      float32 y * cellSize.Y + cellSize.Y / 2f
+    )

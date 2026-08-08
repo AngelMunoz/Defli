@@ -17,6 +17,9 @@
     <Compile Include="WavesTests.fs" />
     <Compile Include="EconomyTests.fs" />
     <Compile Include="ProjectionTests.fs" />
+    <Compile Include="TowersTests.fs" />
+    <Compile Include="ProjectilesTests.fs" />
+    <Compile Include="DiagnosticsTests.fs" />
     <Compile Include="RouterTests.fs" />
     <Compile Include="Main.fs" />
   </ItemGroup>

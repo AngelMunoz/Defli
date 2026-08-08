@@ -11,11 +11,15 @@
     <Compile Include="Extensions.fs" />
     <Compile Include="World/Domain.fs" />
     <Compile Include="World/Tiles.fs" />
+    <Compile Include="Diagnostics.fs" />
     <Compile Include="World/Systems/Map.fs" />
     <Compile Include="World/Systems/Enemies.fs" />
     <Compile Include="World/Systems/Spawning.fs" />
     <Compile Include="World/Systems/Waves.fs" />
     <Compile Include="World/Systems/Economy.fs" />
+    <Compile Include="World/Systems/Towers.fs" />
+    <Compile Include="World/Systems/Projectiles.fs" />
+    <Compile Include="World/Systems/Vfx.fs" />
     <Compile Include="World/Projections.fs" />
     <Compile Include="World/World.fs" />
     <Compile Include="Application.fs" />

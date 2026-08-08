@@ -7,6 +7,7 @@ open Mibo.Elmish.Graphics
 open Mibo.Elmish.Graphics2D
 open Mibo.Input
 open Mibo.Layout
+open Raylib_cs
 open Defli.World
 
 // ─────────────────────────────────────────────────────────────
@@ -16,7 +17,9 @@ open Defli.World
 // ─────────────────────────────────────────────────────────────
 
 [<Struct>]
-type GameAction = | StartNextWave
+type GameAction =
+  | StartNextWave
+  | ToggleDiagnostics
 
 type Model() =
   member val World: WorldModel = Unchecked.defaultof<_> with get, set
@@ -25,6 +28,8 @@ type Model() =
     Unchecked.defaultof<_> with get, set
 
   member val MousePos: Vector2 = Unchecked.defaultof<_> with get, set
+  /// Main-MVU frame diagnostics (Kimo FrameDiag, simplified).
+  member val Diag = FrameDiag() with get, set
 
 
 [<Struct>]
@@ -41,6 +46,7 @@ module Inputs =
     InputMap.empty
     |> InputMap.key GameAction.StartNextWave KeyCode.Space
     |> InputMap.key GameAction.StartNextWave KeyCode.Enter
+    |> InputMap.key GameAction.ToggleDiagnostics KeyCode.F3
 
 module Application =
 
@@ -60,12 +66,18 @@ module Application =
   let update (msg: Msg) (model: Model) : struct (Model * Cmd<Msg>) =
     match msg with
     | Tick gt ->
+      Diagnostics.update model.Diag
       let struct (world, cmd) = World.update (RoomTick gt) model.World
       model.World <- world
       model, Cmd.map WorldMsg cmd
     | InputChanged inputs ->
+      let started = inputs.Started
+
+      if started.Contains GameAction.ToggleDiagnostics then
+        model.Diag.Visible <- not model.Diag.Visible
+
       let cmd =
-        if inputs.Started.Contains GameAction.StartNextWave then
+        if started.Contains GameAction.StartNextWave then
           Cmd.ofMsg(WorldMsg WorldMsg.StartNextWave)
         else
           Cmd.none
@@ -74,9 +86,16 @@ module Application =
       model, cmd
     | MouseMoved pos ->
       model.MousePos <- pos
+
+      // Hover cell — shell writes the CVal the world projections join on.
+      let cell =
+        model.World.Map.Grid
+        |> Grid2DSpatial.worldToCell(pos + cursorOffset)
+
+      model.World.HoverCell.Set cell
       model, Cmd.none
     | MouseClicked pos ->
-      // Click → cell (tower placement intent; Towers validates in Phase 2).
+      // Click → cell (tower placement intent; the router validates).
       let cell =
         model.World.Map.Grid |> Grid2DSpatial.worldToCell(pos + cursorOffset)
 
@@ -89,11 +108,13 @@ module Application =
       model, Cmd.map WorldMsg cmd
 
   let view (ctx: GameContext) (model: Model) (buffer: RenderBuffer2D) =
-    let hoverCell =
-      model.World.Map.Grid
-      |> Grid2DSpatial.worldToCell(model.MousePos + cursorOffset)
+    Diagnostics.drawn (Diagnostics.tickStart()) model.Diag
+    World.view ctx model.World buffer
 
-    World.view ctx model.World hoverCell buffer
+    if model.Diag.Visible then
+      let font = Raylib.GetFontDefault()
+      buffer.frameDiagnostics(font, model.Diag, Vector2(12f, 40f)).drop()
+      buffer.worldDiagnostics(font, model.World.Diag, Vector2(12f, 64f)).drop()
 
   let subscribe (ctx: GameContext) (_model: Model) : Sub<Msg> =
     Sub.batch [

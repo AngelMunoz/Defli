@@ -44,6 +44,8 @@ type MapTile = {
   Terrain: TerrainKind
   IsPath: bool
   Buildable: bool
+  /// True on the path's waypoint cells (spawn/base — Waypoints layer).
+  IsWaypoint: bool
 }
 
 /// One baked atlas tile (position + size), see Tiles.fs.
@@ -240,10 +242,7 @@ type ProjectileRow = {
 /// Render row of the world-owned Homing projection
 /// (Projectiles.Rows × Enemies.Positions).
 [<Struct>]
-type HomingView = {
-  Pos: Vector2
-  TargetPos: Vector2
-}
+type HomingView = { Pos: Vector2; TargetPos: Vector2 }
 
 // ─────────────────────────────────────────────────────────────
 // Placement preview (hover highlight state)
@@ -266,6 +265,7 @@ module Cells =
   /// cell size is uniform — see MapModel.create).
   let center (cell: struct (int * int)) (cellSize: Vector2) =
     let struct (x, y) = cell
+
     Vector2(
       float32 x * cellSize.X + cellSize.X / 2f,
       float32 y * cellSize.Y + cellSize.Y / 2f

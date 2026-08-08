@@ -109,13 +109,20 @@ let tests =
       runner.StepN(2, TestData.dt)
 
       let model = runner.Model
-      Expect.equal (goldOf model) (cfg.StartingGold - TowerDefs.arrow.Cost) "gold spent"
+
+      Expect.equal
+        (goldOf model)
+        (cfg.StartingGold - TowerDefs.arrow.Cost)
+        "gold spent"
 
       match model.Towers.CellIndex |> CMap.tryGetValue cell with
       | ValueSome _ -> ()
       | ValueNone -> failtest "tower must be placed"
 
-      Expect.equal ((model.Towers.Statics |> AMap.getValue).Count) 1 "one tower")
+      Expect.equal
+        ((model.Towers.Statics |> AMap.getValue).Count)
+        1
+        "one tower")
 
     testCase "PlaceTower on path cell is rejected" (fun () ->
       let runner = TestData.mkRunner cfg
@@ -139,7 +146,11 @@ let tests =
       runner.StepN(2, TestData.dt)
 
       let model = runner.Model
-      Expect.equal ((model.Towers.Statics |> AMap.getValue).Count) 1 "still one tower"
+
+      Expect.equal
+        ((model.Towers.Statics |> AMap.getValue).Count)
+        1
+        "still one tower"
 
       Expect.equal
         (goldOf model)
@@ -150,7 +161,10 @@ let tests =
       let runner = TestData.mkRunner cfg
 
       // Drain gold below the cost.
-      runner.Dispatch(WorldMsg.EconomyMsg(EconomyMsg.SpendGold(cfg.StartingGold - 1)))
+      runner.Dispatch(
+        WorldMsg.EconomyMsg(EconomyMsg.SpendGold(cfg.StartingGold - 1))
+      )
+
       runner.StepN(2, TestData.dt)
 
       runner.Dispatch(WorldMsg.PlaceTower(struct (1, 1)))
@@ -160,44 +174,50 @@ let tests =
       Expect.equal ((model.Towers.Statics |> AMap.getValue).Count) 0 "no tower"
       Expect.equal (goldOf model) 1 "gold untouched")
 
-    testCase "tower fires → projectile homes → impact damages the enemy" (fun () ->
-      let runner = TestData.mkRunner cfg
+    testCase
+      "tower fires → projectile homes → impact damages the enemy"
+      (fun () ->
+        let runner = TestData.mkRunner cfg
 
-      // Place a tower next to the path (the road runs along row 4).
-      runner.Dispatch(WorldMsg.PlaceTower(struct (2, 3)))
-      runner.StepN(2, TestData.dt)
+        // Place a tower next to the path (the road runs along row 4).
+        runner.Dispatch(WorldMsg.PlaceTower(struct (2, 3)))
+        runner.StepN(2, TestData.dt)
 
-      // Spawn one grunt on the path in range of the tower.
-      runner.Dispatch(WorldMsg.EnemyMsg(Enemies.EnemyMsg.Spawn TestData.Fixtures.grunt))
-      runner.StepN(2, TestData.dt)
-
-      // Step until the tower fires (cooldown 0.5 s) and the projectile
-      // reaches the enemy (240 px/s, enemy ~64 px away).
-      let fired =
-        runner.StepUntil(
-          (fun m -> (m.Projectiles.Rows |> AMap.getValue).Count > 0),
-          TestData.dt,
-          120
+        // Spawn one grunt on the path in range of the tower.
+        runner.Dispatch(
+          WorldMsg.EnemyMsg(Enemies.EnemyMsg.Spawn TestData.Fixtures.grunt)
         )
 
-      Expect.isTrue fired "tower fired within budget"
+        runner.StepN(2, TestData.dt)
 
-      let impacted =
-        runner.StepUntil(
-          (fun m ->
-            (m.Projectiles.Rows |> AMap.getValue).Count = 0
-            && AVal.getValue m.Enemies.AliveCount = 0),
-          TestData.dt,
-          120
-        )
+        // Step until the tower fires (cooldown 0.5 s) and the projectile
+        // reaches the enemy (240 px/s, enemy ~64 px away).
+        let fired =
+          runner.StepUntil(
+            (fun m -> (m.Projectiles.Rows |> AMap.getValue).Count > 0),
+            TestData.dt,
+            120
+          )
 
-      Expect.isTrue impacted "enemy died to tower fire within budget"
+        Expect.isTrue fired "tower fired within budget"
 
-      let model = runner.Model
+        let impacted =
+          runner.StepUntil(
+            (fun m ->
+              (m.Projectiles.Rows |> AMap.getValue).Count = 0
+              && AVal.getValue m.Enemies.AliveCount = 0),
+            TestData.dt,
+            120
+          )
 
-      // Grunt died (despawned by the router): gold includes the reward.
-      Expect.equal
-        (goldOf model)
-        (cfg.StartingGold - TowerDefs.arrow.Cost + TestData.Fixtures.grunt.GoldReward)
-        "kill rewarded")
+        Expect.isTrue impacted "enemy died to tower fire within budget"
+
+        let model = runner.Model
+
+        // Grunt died (despawned by the router): gold includes the reward.
+        Expect.equal
+          (goldOf model)
+          (cfg.StartingGold - TowerDefs.arrow.Cost
+           + TestData.Fixtures.grunt.GoldReward)
+          "kill rewarded")
   ]

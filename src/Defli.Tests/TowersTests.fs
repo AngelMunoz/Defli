@@ -29,6 +29,7 @@ let private def = {
 /// A single enemy standing at a position (transient Alive-shaped dict).
 let private enemyAt (pos: Vector2) (progress: float32) =
   let d = Dictionary<int<EnemyId>, EnemyView>()
+
   d[0 * 1<EnemyId>] <- {
     Pos = pos
     Hp = 100
@@ -37,10 +38,14 @@ let private enemyAt (pos: Vector2) (progress: float32) =
     Slow = 1f
     PathIndex = 1
   }
+
   d
 
 let private cellCenter(struct (x, y)) =
-  Vector2(float32 x * cellSize.X + cellSize.X / 2f, float32 y * cellSize.Y + cellSize.Y / 2f)
+  Vector2(
+    float32 x * cellSize.X + cellSize.X / 2f,
+    float32 y * cellSize.Y + cellSize.Y / 2f
+  )
 
 let tests =
   testList "Towers" [
@@ -50,14 +55,14 @@ let tests =
 
       let struct (m', _) = Towers.update (TowerMsg.Place(cell, def)) m
 
-      Expect.equal ((m'.Statics |> AMap.getValue).Count) 1 "statics"
-      Expect.equal ((m'.Runtimes |> AMap.getValue).Count) 1 "runtimes"
+      Expect.equal (m'.Statics |> AMap.getValue).Count 1 "statics"
+      Expect.equal (m'.Runtimes |> AMap.getValue).Count 1 "runtimes"
 
       match m'.CellIndex |> CMap.tryGetValue cell with
       | ValueSome tid -> Expect.equal tid (0 * 1<TowerId>) "indexed"
       | ValueNone -> failtest "cell must be indexed"
 
-      match m'.Statics |> CMap.tryGetValue (0 * 1<TowerId>) with
+      match m'.Statics |> CMap.tryGetValue(0 * 1<TowerId>) with
       | ValueSome s -> Expect.equal s.Def def "def stored"
       | ValueNone -> failtest "tower must exist")
 
@@ -68,12 +73,12 @@ let tests =
       let struct (m', _) = Towers.update (TowerMsg.Place(cell, def)) m
 
       // Range 2 cells ≈ 128 px; enemy is far away.
-      let alive = enemyAt (Vector2(900f, 900f)) 0.5f
+      let alive = AMap.constant(fun () -> enemyAt (Vector2(900f, 900f)) 0.5f)
       let struct (m2, events) = Towers.tick 0.1f m' alive cellSize
       Expect.isEmpty events "no fire"
       Expect.equal (Seq.length events) 0 "no events"
 
-      match m2.Runtimes |> CMap.tryGetValue (0 * 1<TowerId>) with
+      match m2.Runtimes |> CMap.tryGetValue(0 * 1<TowerId>) with
       | ValueSome r -> Expect.equal r.Cooldown 0f "ready"
       | ValueNone -> failtest "runtime must exist")
 
@@ -84,7 +89,8 @@ let tests =
       let struct (m', _) = Towers.update (TowerMsg.Place(cell, def)) m
 
       // Tower center (3,3) = (224, 224); enemy one cell east = in range 2.
-      let alive = enemyAt (cellCenter(struct (4, 3))) 0.5f
+      let alive =
+        AMap.constant(fun () -> enemyAt (cellCenter struct (4, 3)) 0.5f)
 
       let struct (m2, events) = Towers.tick 0.1f m' alive cellSize
 
@@ -95,7 +101,7 @@ let tests =
         Expect.equal damage def.Damage "damage"
       | _ -> failtest "expected exactly one Fired"
 
-      match m2.Runtimes |> CMap.tryGetValue (0 * 1<TowerId>) with
+      match m2.Runtimes |> CMap.tryGetValue(0 * 1<TowerId>) with
       | ValueSome r ->
         Expect.equal r.Cooldown (1f / def.FireRate) "cooldown set"
         Expect.equal r.Target (ValueSome(0 * 1<EnemyId>)) "target stored"
@@ -111,7 +117,7 @@ let tests =
       let alive = Dictionary<int<EnemyId>, EnemyView>()
 
       alive[1 * 1<EnemyId>] <- {
-        Pos = cellCenter(struct (4, 3))
+        Pos = cellCenter struct (4, 3)
         Hp = 100
         MaxHp = 100
         Progress = 0.2f
@@ -120,7 +126,7 @@ let tests =
       }
 
       alive[2 * 1<EnemyId>] <- {
-        Pos = cellCenter(struct (4, 2))
+        Pos = cellCenter struct (4, 2)
         Hp = 100
         MaxHp = 100
         Progress = 0.8f
@@ -128,10 +134,13 @@ let tests =
         PathIndex = 1
       }
 
+      let alive = AMap.constant(fun () -> alive)
+
       let struct (_, events) = Towers.tick 0.1f m' alive cellSize
 
       match events |> Seq.toArray with
-      | [| Fired(_, eid, _) |] -> Expect.equal eid (2 * 1<EnemyId>) "first = highest progress"
+      | [| Fired(_, eid, _) |] ->
+        Expect.equal eid (2 * 1<EnemyId>) "first = highest progress"
       | _ -> failtest "expected exactly one Fired")
 
     testCase "cooldown gates firing" (fun () ->
@@ -140,7 +149,8 @@ let tests =
 
       let struct (m', _) = Towers.update (TowerMsg.Place(cell, def)) m
 
-      let alive = enemyAt (cellCenter(struct (4, 3))) 0.5f
+      let alive =
+        AMap.constant(fun () -> enemyAt (cellCenter struct (4, 3)) 0.5f)
 
       // Fire (cooldown = 0.25 at FireRate 4).
       let struct (m2, events) = Towers.tick 0.1f m' alive cellSize

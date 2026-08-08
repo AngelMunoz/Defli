@@ -9,6 +9,7 @@ open Mibo.Input
 open Mibo.Layout
 open Raylib_cs
 open Defli.World
+open Defli.World.Systems
 
 // ─────────────────────────────────────────────────────────────
 // Shell — the thin MVU layer: input mapping, window config,
@@ -49,6 +50,7 @@ module Inputs =
     |> InputMap.key GameAction.ToggleDiagnostics KeyCode.F3
 
 module Application =
+  open AdaptiveSlop.Core
 
   /// Cursor compensation (pixels) applied to the raw mouse position before
   /// cell conversion. Tune this single constant if the hover/click highlight
@@ -89,15 +91,18 @@ module Application =
 
       // Hover cell — shell writes the CVal the world projections join on.
       let cell =
-        model.World.Map.Grid
+        model.World.Map
+        |> MapModel.terrain
         |> Grid2DSpatial.worldToCell(pos + cursorOffset)
 
-      model.World.HoverCell.Set cell
+      model.World.HoverCell |> CVal.set cell
       model, Cmd.none
     | MouseClicked pos ->
       // Click → cell (tower placement intent; the router validates).
       let cell =
-        model.World.Map.Grid |> Grid2DSpatial.worldToCell(pos + cursorOffset)
+        model.World.Map
+        |> MapModel.terrain
+        |> Grid2DSpatial.worldToCell(pos + cursorOffset)
 
       match cell with
       | ValueSome c -> model, Cmd.ofMsg(WorldMsg(PlaceTower c))

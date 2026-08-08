@@ -238,7 +238,7 @@ module Enemies =
               let segLen = Vector2.Distance(path[idx], path[idx + 1])
 
               if segLen <= 0f then
-                (float32 idx) / total
+                float32 idx / total
               else
                 (Vector2.Distance(path[idx], p) / segLen + float32 idx) / total
 
@@ -278,37 +278,35 @@ module Enemies =
     let defs = model.Defs |> AMap.getValue
 
     for KeyValueV(eid, v) in alive do
-      match defs |> ReadOnlyDict.tryGetValue eid with
-      | ValueNone -> ()
-      | ValueSome def ->
-        match Tanks.tryByName def.Sprite with
-        | ValueNone -> ()
-        | ValueSome tile ->
-          // Scale the baked sprite to a consistent ~44px while keeping aspect.
-          let scale = 44f / max (float32 tile.Width) (float32 tile.Height)
-          let w = float32 tile.Width * scale
-          let h = float32 tile.Height * scale
+      defs
+      |> ReadOnlyDict.tryGetValue eid
+      |> ValueOption.bind(_.Sprite >> Tanks.tryByName)
+      |> ValueOption.iter(fun tile ->
+        // Scale the baked sprite to a consistent ~44px while keeping aspect.
+        let scale = 44f / max (float32 tile.Width) (float32 tile.Height)
+        let w = float32 tile.Width * scale
+        let h = float32 tile.Height * scale
 
-          // Heading toward the next waypoint (0° = up; raylib rotates CW).
-          let angle =
-            if v.PathIndex >= path.Length - 1 then
-              0f
-            else
-              let d = path[v.PathIndex + 1] - v.Pos
-              (90f + MathF.Atan2(d.Y, d.X) * 180f / MathF.PI) % 360f
+        // Heading toward the next waypoint (0° = up; raylib rotates CW).
+        let angle =
+          if v.PathIndex >= path.Length - 1 then
+            0f
+          else
+            let d = path[v.PathIndex + 1] - v.Pos
+            (90f + MathF.Atan2(d.Y, d.X) * 180f / MathF.PI) % 360f
 
-          buffer
-            .sprite(
-              SpriteState.create(
-                tex,
-                Rectangle(v.Pos.X - w / 2f, v.Pos.Y - h / 2f, w, h),
-                tile.Rect
-              )
-              |> SpriteState.withOrigin(Vector2(w / 2f, h / 2f))
-              |> SpriteState.withRotation angle
-              |> SpriteState.withLayer Layers.Entities
+        buffer
+          .sprite(
+            SpriteState.create(
+              tex,
+              Rectangle(v.Pos.X - w / 2f, v.Pos.Y - h / 2f, w, h),
+              tile.Rect
             )
-            .drop()
+            |> SpriteState.withOrigin(Vector2(w / 2f, h / 2f))
+            |> SpriteState.withRotation angle
+            |> SpriteState.withLayer Layers.Entities
+          )
+          .drop())
 
       // Health bar (only when damaged).
       if v.Hp < v.MaxHp then

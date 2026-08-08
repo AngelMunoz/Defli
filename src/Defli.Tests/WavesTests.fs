@@ -38,13 +38,13 @@ let tests =
 
       // Still spawning: no clear.
       let struct (m2, events) = Waves.tick 0.1f m' 3 false
-      Expect.equal events.Length 0 "not cleared with enemies alive"
+      Expect.equal (events |> Seq.length) 0 "not cleared with enemies alive"
 
       // Queue empty and no enemies: cleared.
       let struct (m3, events) = Waves.tick 0.1f m2 0 true
 
-      match events with
-      | [| WaveCleared |] -> ()
+      match events |> Seq.tryHead with
+      | Some WaveCleared -> ()
       | _ -> failtest "expected WaveCleared"
 
       Expect.isFalse m3.WaveActive.Value "inactive after clear")

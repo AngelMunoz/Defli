@@ -19,25 +19,56 @@ let tests =
       Expect.equal map.BaseCell (struct (19, 2)) "base cell"
       Expect.isGreaterThan map.Path.Length 1 "waypoints")
 
-    testCase "path cells are marked and non-buildable" (fun () ->
+    testCase "path layer: every cell marked, none buildable" (fun () ->
+      let pathGrid = MapModel.pathGrid map
       let mutable pathCount = 0
-      let mutable violations = 0
 
-      for y in 0 .. map.Grid.Height - 1 do
-        for x in 0 .. map.Grid.Width - 1 do
-          match CellGrid2D.get x y map.Grid with
-          | ValueSome tile ->
-            if tile.IsPath then
-              pathCount <- pathCount + 1
+      CellGrid2D.iter
+        (fun _ _ tile ->
+          pathCount <- pathCount + 1
+          Expect.isTrue tile.IsPath "path tile marked"
+          Expect.isFalse tile.Buildable "path tile not buildable")
+        pathGrid
 
-              if tile.Buildable then
-                violations <- violations + 1
-            elif not tile.Buildable then
-              violations <- violations + 1
-          | ValueNone -> ()
+      Expect.isGreaterThan pathCount 0 "path exists")
 
-      Expect.isGreaterThan pathCount 0 "path exists"
-      Expect.equal violations 0 "no buildable path / unbuildable grass")
+    testCase "buildable layer: no buildable cell sits on the road" (fun () ->
+      let pathGrid = MapModel.pathGrid map
+      let buildable = MapModel.buildableGrid map
+
+      CellGrid2D.iter
+        (fun x y tile ->
+          if tile.Buildable then
+            match CellGrid2D.get x y pathGrid with
+            | ValueSome p -> Expect.isFalse p.IsPath "buildable not on path"
+            | ValueNone -> ())
+        buildable)
+
+    testCase "isBuildable: grass yes, road no, out of grid no" (fun () ->
+      Expect.isTrue (MapModel.isBuildable 0 0 map) "grass buildable"
+      Expect.isFalse (MapModel.isBuildable 1 4 map) "road not buildable"
+      Expect.isFalse (MapModel.isBuildable -1 0 map) "out of grid")
+
+    testCase "waypoints layer marks the path vertices" (fun () ->
+      let waypoints = MapModel.waypoints map
+
+      let marked =
+        CellGrid2D.get 0 4 waypoints
+        |> ValueOption.exists(fun t -> t.IsWaypoint)
+
+      Expect.isTrue marked "spawn vertex marked"
+
+      let baseMarked =
+        CellGrid2D.get 19 2 waypoints
+        |> ValueOption.exists(fun t -> t.IsWaypoint)
+
+      Expect.isTrue baseMarked "base vertex marked"
+
+      let offPath =
+        CellGrid2D.get 3 3 waypoints
+        |> ValueOption.exists(fun t -> t.IsWaypoint)
+
+      Expect.isFalse offPath "off-path cell not marked")
 
     testCase "waypoint centers sit at cell centers" (fun () ->
       for p in map.Path do
@@ -46,8 +77,9 @@ let tests =
         Expect.equal (p.Y % 64f) 32f "center y")
 
     testCase "spawn and base cells are on the path" (fun () ->
-      let spawnTile = CellGrid2D.get 0 4 map.Grid
-      let baseTile = CellGrid2D.get 19 2 map.Grid
+      let pathGrid = MapModel.pathGrid map
+      let spawnTile = CellGrid2D.get 0 4 pathGrid
+      let baseTile = CellGrid2D.get 19 2 pathGrid
 
       match spawnTile, baseTile with
       | ValueSome s, ValueSome b ->

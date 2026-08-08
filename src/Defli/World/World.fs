@@ -58,19 +58,20 @@ module World =
     model.Map <- MapModel.create cfg
     model.Spawning <- Spawning.Spawning.init cfg.Seed
     model.Economy <- Economy.Economy.init cfg
+
     model.Projections <-
       Projections(
         model.Enemies,
         model.Towers,
         model.Projectiles,
         model.Economy,
-        model.Map.Grid,
+        MapModel.buildableGrid model.Map,
         model.HoverCell
       )
 
     model
 
-  let cellSize(model: WorldModel) =
+  let inline cellSize(model: WorldModel) =
     Vector2(float32 Tiles.TileSize, float32 Tiles.TileSize)
 
   // ── Event → Cmd translation (the router's only job) ──
@@ -84,9 +85,9 @@ module World =
         match ev with
         | Enemies.Killed(eid, reward) ->
           let pos =
-            match model.Enemies.Positions |> CMap.tryGetValue eid with
-            | ValueSome p -> p
-            | ValueNone -> Vector2.Zero
+            model.Enemies.Positions
+            |> CMap.tryGetValue eid
+            |> ValueOption.defaultValue Vector2.Zero
 
           Cmd.ofMsg(EconomyMsg(Economy.EarnGold reward))
           Cmd.ofMsg(EnemyMsg(Enemies.Despawn eid))
@@ -106,7 +107,7 @@ module World =
 
   let private translateWaveEvents
     (waveClearBonus: int)
-    (events: Waves.WaveEvent[])
+    (events: Waves.WaveEvent seq)
     (model: WorldModel)
     : Cmd<WorldMsg>[] =
     [|
@@ -136,9 +137,12 @@ module World =
         match ev with
         | Towers.Fired(tid, eid, damage) ->
           let struct (pos, speed) =
-            match model.Towers.Statics |> CMap.tryGetValue tid with
-            | ValueSome s -> struct (Cells.center s.Cell (cellSize model), s.Def.ProjectileSpeed)
-            | ValueNone -> struct (Vector2.Zero, 0f)
+            model.Towers.Statics
+            |> CMap.tryGetValue tid
+            |> ValueOption.map(fun s ->
+              struct (Cells.center s.Cell (cellSize model),
+                      s.Def.ProjectileSpeed))
+            |> ValueOption.defaultValue struct (Vector2.Zero, 0f)
 
           Cmd.ofMsg(ProjectilesMsg(Projectiles.Spawn(pos, eid, damage, speed)))
           Cmd.ofMsg(VfxMsg(Vfx.Burst(Vfx.VfxKind.Muzzle, pos)))
@@ -171,17 +175,17 @@ module World =
         Enemies.Enemies.tick dt model.Enemies model.Map.Path
 
       let struct (_, spawnEvents) = Spawning.Spawning.tick dt model.Spawning
-
-      // One transient read of Alive per frame — the targeting query
-      // (Towers) and the wave-clear check share it; the count is the
-      // dictionary's, so the AliveCount node is not pulled twice.
-      let alive = model.Enemies.Alive |> AMap.getValue
+      let aliveCount = model.Enemies.Alive |> AMap.count |> AVal.getValue
 
       let struct (_, waveEvents) =
-        Waves.Waves.tick dt model.Waves alive.Count (model.Spawning.Queue.Count = 0)
+        Waves.Waves.tick
+          dt
+          model.Waves
+          aliveCount
+          (model.Spawning.Queue.Count = 0)
 
       let struct (_, towerEvents) =
-        Towers.Towers.tick dt model.Towers alive (cellSize model)
+        Towers.Towers.tick dt model.Towers model.Enemies.Alive (cellSize model)
 
       let struct (_, projectileEvents) =
         Projectiles.Projectiles.tick
@@ -190,7 +194,7 @@ module World =
           (model.Enemies.Positions |> AMap.getValue)
 
       Vfx.Vfx.tick dt model.Vfx
-      Diagnostics.tickEnd t0 model.Diag alive.Count model.Spawning.Queue.Count
+      Diagnostics.tickEnd t0 model.Diag aliveCount model.Spawning.Queue.Count
 
       model,
       Cmd.batch [|
@@ -215,12 +219,11 @@ module World =
       let def = TowerDefs.arrow
       let struct (cx, cy) = cell
 
-      let tileOk =
-        match CellGrid2D.get cx cy model.Map.Grid with
-        | ValueSome t -> t.Buildable
-        | ValueNone -> false
+      let tileOk = MapModel.isBuildable cx cy model.Map
 
-      let occupied = (model.Towers.CellIndex |> CMap.tryGetValue cell).IsSome
+      let occupied =
+        ValueOption.isSome(model.Towers.CellIndex |> CMap.tryGetValue cell)
+
       let affordable = AVal.getValue model.Economy.Gold >= def.Cost
 
       if tileOk && not occupied && affordable then
@@ -248,7 +251,9 @@ module World =
       let struct (_, events) = Towers.Towers.update m model.Towers
       model, Cmd.batch(translateTowerEvents model events)
     | ProjectilesMsg m ->
-      let struct (_, events) = Projectiles.Projectiles.update m model.Projectiles
+      let struct (_, events) =
+        Projectiles.Projectiles.update m model.Projectiles
+
       model, Cmd.batch(translateProjectileEvents events)
     | VfxMsg m ->
       Vfx.Vfx.update m model.Vfx
@@ -272,7 +277,7 @@ module World =
     buffer
       .text(
         font,
-        sprintf "Gold: %d   Lives: %d   %s" gold lives banner,
+        $"Gold: %d{gold}   Lives: %d{lives}   %s{banner}",
         Vector2(12f, 10f),
         22f,
         layer = Layers.Hud
@@ -286,18 +291,15 @@ module World =
 
   // ── Placement preview + range ring (hover overlays) ──
 
-  let private hoverOverlays
-    (model: WorldModel)
-    (buffer: RenderBuffer2D)
-    =
+  let private hoverOverlays (model: WorldModel) (buffer: RenderBuffer2D) =
     let size = float32 Tiles.TileSize
 
     // Placement preview: the hovered cell's build status.
-    let drawOutline (color: Mibo.Color) =
+    let drawOutline(color: Mibo.Color) =
       match model.HoverCell.Value with
       | ValueSome c ->
         let struct (hx, hy) = c
-        let p = CellGrid2D.getWorldPos hx hy model.Map.Grid
+        let p = CellGrid2D.getWorldPos hx hy (MapModel.terrain model.Map)
 
         buffer
           .rectOutline(
@@ -316,13 +318,16 @@ module World =
     | PlacementStatus.Hidden -> ()
     | PlacementStatus.Blocked -> drawOutline Mibo.Color.Red
     | PlacementStatus.Affordable -> drawOutline Mibo.Color.Green
-    | PlacementStatus.TooExpensive -> drawOutline (Mibo.Color.rgb 255uy 210uy 0uy)
+    | PlacementStatus.TooExpensive ->
+      drawOutline(Mibo.Color.rgb 255uy 210uy 0uy)
 
     // Range ring: hovering an own tower shows its range circle.
-    match AVal.getValue model.Projections.RangeRing with
-    | ValueSome def ->
-      match model.HoverCell.Value with
-      | ValueSome c ->
+    let rangeRing = AVal.getValue model.Projections.RangeRing
+    let hoverCel = AVal.getValue model.HoverCell
+
+    hoverCel
+    |> ValueOption.iter2
+      (fun def c ->
         let center = Cells.center c (cellSize model)
 
         buffer
@@ -332,20 +337,28 @@ module World =
             Mibo.Color.Blue,
             layer = Layers.Effects
           )
-          .drop()
-      | ValueNone -> ()
-    | ValueNone -> ()
+          .drop())
+      rangeRing
 
-  let view
-    (ctx: GameContext)
-    (model: WorldModel)
-    (buffer: RenderBuffer2D)
-    =
+
+  let view (ctx: GameContext) (model: WorldModel) (buffer: RenderBuffer2D) =
     let size = cellSize model
-    Map.view ctx model.Map buffer
+
+    // No Camera2D yet — the visible rect is the full window in world
+    // space (grid origin is 0,0). Phase 4 swaps in the camera bounds.
+    let visible =
+      Rectangle(0f, 0f, float32 ctx.WindowWidth, float32 ctx.WindowHeight)
+
+    Map.view ctx model.Map visible buffer
     Towers.Towers.view ctx model.Towers size buffer
     Enemies.Enemies.view ctx model.Enemies model.Map.Path buffer
-    Projectiles.Projectiles.view ctx model.Projectiles model.Projections.Homing buffer
+
+    Projectiles.Projectiles.view
+      ctx
+      model.Projectiles
+      model.Projections.Homing
+      buffer
+
     Vfx.Vfx.view ctx model.Vfx buffer
     hoverOverlays model buffer
     hudView ctx model buffer

@@ -33,19 +33,25 @@ let tests =
       // 10 frames at 100 ms from 0: the window refreshes at 500 ms
       // (first stamp where elapsed ≥ 0.5 s) with 6 draws over 0.5 s
       // → exactly 12 FPS, 83.3 ms mean.
-      for i in 0 .. 9 do
+      for i in 0..9 do
         Diagnostics.drawn (ms(float i * 100.0)) diag
 
       Expect.isFalse (String.IsNullOrEmpty diag.Display) "display formatted"
       Expect.floatClose Accuracy.medium (float diag.Fps) 12.0 "fps = 6 / 0.5"
-      Expect.floatClose Accuracy.medium (float diag.FrameMs) (500.0 / 6.0) "frame ms = 500 / 6"
+
+      Expect.floatClose
+        Accuracy.medium
+        (float diag.FrameMs)
+        (500.0 / 6.0)
+        "frame ms = 500 / 6"
+
       Expect.isTrue (diag.WorstMs >= diag.FrameMs) "worst ≥ mean")
 
     testCase "drawn: rates are windowed, not cumulative" (fun () ->
       let diag = FrameDiag()
 
       // Window 1: refresh at 500 ms with 6 draws → 12 FPS.
-      for i in 0 .. 9 do
+      for i in 0..9 do
         Diagnostics.drawn (ms(float i * 100.0)) diag
 
       Expect.floatClose Accuracy.medium (float diag.Fps) 12.0 "fps window 1"
@@ -53,10 +59,15 @@ let tests =
       // Window 2, CONTINUOUS from 1000 ms: the next refresh happens
       // at 1000 ms (5 draws since the 500 ms refresh: 600..1000) over
       // 0.5 s → 10 FPS. A cumulative counter would read 20/1.45 ≈ 13.8.
-      for i in 0 .. 9 do
+      for i in 0..9 do
         Diagnostics.drawn (ms(1000.0 + float i * 50.0)) diag
 
-      Expect.floatClose Accuracy.medium (float diag.Fps) 10.0 "fps resets per window"
+      Expect.floatClose
+        Accuracy.medium
+        (float diag.Fps)
+        10.0
+        "fps resets per window"
+
       Expect.isLessThan (float diag.Fps) 13.8 "windowed beats cumulative")
 
     testCase "update counts Tick calls into UpdateHz" (fun () ->
@@ -70,7 +81,11 @@ let tests =
       // One draw 1 s later: window = 1 s → 3 updates/s.
       Diagnostics.drawn (ms 1000.0) diag
 
-      Expect.floatClose Accuracy.medium (float diag.UpdateHz) 3.0 "update hz = 3")
+      Expect.floatClose
+        Accuracy.medium
+        (float diag.UpdateHz)
+        3.0
+        "update hz = 3")
 
     testCase "tickEnd: tick count, sim EMA, live counts" (fun () ->
       let diag = WorldDiag()

@@ -25,7 +25,7 @@ open Defli.World
 // ─────────────────────────────────────────────────────────────
 
 [<Struct>]
-type TowerMsg = | Place of cell: struct (int * int) * def: TowerDef
+type TowerMsg = Place of cell: struct (int * int) * def: TowerDef
 
 [<Struct>]
 type TowerEvent =
@@ -34,7 +34,10 @@ type TowerEvent =
 type TowersModel() =
   member val Statics = CMap.empty<int<TowerId>, TowerStatic> with get, set
   member val Runtimes = CMap.empty<int<TowerId>, TowerRuntime> with get, set
-  member val CellIndex = CMap.empty<struct (int * int), int<TowerId>> with get, set
+
+  member val CellIndex =
+    CMap.empty<struct (int * int), int<TowerId>> with get, set
+
   member val NextId = 0 with get, set
 
 module Towers =
@@ -68,7 +71,7 @@ module Towers =
   let tick
     (dt: float32)
     (model: TowersModel)
-    (alive: IReadOnlyDictionary<int<EnemyId>, EnemyView>)
+    (alive: amap<int<EnemyId>, EnemyView>)
     (cellSize: Vector2)
     : struct (TowersModel * TowerEvent seq) =
     let mutable events: ResizeArray<TowerEvent> = null
@@ -80,9 +83,9 @@ module Towers =
       let runtime = model.Runtimes |> CMap.tryGetValue tid
 
       let cooldown =
-        match runtime with
-        | ValueSome r -> r.Cooldown
-        | ValueNone -> 0f
+        runtime
+        |> ValueOption.map(fun r -> r.Cooldown)
+        |> ValueOption.defaultValue 0f
 
       let cooldown' = max 0f (cooldown - dt)
 
@@ -91,10 +94,10 @@ module Towers =
         // (highest progress = closest to the base).
         let mutable best: struct (int<EnemyId> * EnemyView) voption = ValueNone
 
-        for KeyValueV(eid, v) in alive do
+        for KeyValueV(eid, v) in alive |> AMap.getValue do
           if Vector2.Distance(center, v.Pos) <= rangeWorld then
             match best with
-            | ValueSome(struct (_, bv)) when bv.Progress >= v.Progress -> ()
+            | ValueSome struct (_, bv) when bv.Progress >= v.Progress -> ()
             | _ -> best <- ValueSome struct (eid, v)
 
         match best with
@@ -113,13 +116,13 @@ module Towers =
           model.Runtimes
           |> CMap.addOrUpdate tid { Cooldown = 0f; Target = ValueNone }
       else
-        let target =
-          match runtime with
-          | ValueSome r -> r.Target
-          | ValueNone -> ValueNone
+        let target = runtime |> ValueOption.bind(fun r -> r.Target)
 
         model.Runtimes
-        |> CMap.addOrUpdate tid { Cooldown = cooldown'; Target = target }
+        |> CMap.addOrUpdate tid {
+          Cooldown = cooldown'
+          Target = target
+        }
 
     model, (if isNull events then Array.empty else events)
 
@@ -155,12 +158,12 @@ module Towers =
         .drop()
 
       // Head (the def's sprite — rocket pod).
-      match Tiles.tryByName s.Def.Sprite with
-      | ValueSome tile ->
+      s.Def.Sprite
+      |> Tiles.tryByName
+      |> ValueOption.iter(fun tile ->
         buffer
           .sprite(
             SpriteState.create(tex, cellRect, tile.Rect)
             |> SpriteState.withLayer Layers.Entities
           )
-          .drop()
-      | ValueNone -> ()
+          .drop())

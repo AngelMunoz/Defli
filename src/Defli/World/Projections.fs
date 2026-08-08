@@ -24,14 +24,15 @@ open Defli.World.Systems
 // ─────────────────────────────────────────────────────────────
 
 [<Sealed>]
-type Projections(
-  enemies: Enemies.EnemiesModel,
-  towers: Towers.TowersModel,
-  projectiles: Projectiles.ProjectilesModel,
-  economy: Economy.EconomyModel,
-  grid: CellGrid2D<MapTile>,
-  hover: aval<struct (int * int) voption>
-) =
+type Projections
+  (
+    enemies: Enemies.EnemiesModel,
+    towers: Towers.TowersModel,
+    projectiles: Projectiles.ProjectilesModel,
+    economy: Economy.EconomyModel,
+    buildable: CellGrid2D<MapTile>,
+    hover: aval<struct (int * int) voption>
+  ) =
 
   /// #3 Homing — one aval per projectile tracking its target's live
   /// position row through the graph. A dead target (row removed from
@@ -44,8 +45,8 @@ type Projections(
       |> AMap.tryFind row.TargetEnemy
       |> AVal.map(fun pos ->
         pos
-        |> ValueOption.toOption
-        |> Option.map(fun p -> { Pos = row.Pos; TargetPos = p })))
+        |> ValueOption.map(fun p -> { Pos = row.Pos; TargetPos = p })
+        |> ValueOption.toOption))
 
   /// #10 RangeRing — hovered own tower → its def (the view draws the
   /// range circle). Hover is shell-owned; CellIndex/Statics are Towers'.
@@ -54,17 +55,12 @@ type Projections(
     |> AVal.bind(fun cell ->
       match cell with
       | ValueNone -> AVal.constant ValueNone
-      | ValueSome c ->
-        towers.CellIndex
-        |> AMap.tryFind c
-        |> AVal.bind(fun tid ->
-          match tid with
-          | ValueNone -> AVal.constant ValueNone
-          | ValueSome tid ->
-            towers.Statics
-            |> AMap.tryFind tid
-            |> AVal.map(fun s ->
-              s |> ValueOption.map(fun s -> s.Def))))
+      | ValueSome c -> towers.CellIndex |> AMap.tryFind c)
+    |> AVal.bind(fun tid ->
+      match tid with
+      | ValueNone -> AVal.constant ValueNone
+      | ValueSome tid -> towers.Statics |> AMap.tryFind tid)
+    |> AVal.map(fun s -> s |> ValueOption.map(fun s -> s.Def))
 
   /// #5 PlacementPreview — the hovered cell's build status: blocked
   /// (path/occupied/out of grid), affordable, or too expensive.
@@ -75,17 +71,21 @@ type Projections(
       match cell with
       | ValueNone -> AVal.constant PlacementStatus.Hidden
       | ValueSome struct (x, y) ->
-        match CellGrid2D.get x y grid with
-        | ValueNone -> AVal.constant PlacementStatus.Blocked
-        | ValueSome tile when not tile.Buildable -> AVal.constant PlacementStatus.Blocked
-        | ValueSome _ ->
+        // The Buildable layer row decides (road cells were stamped
+        // over with the non-buildable path tile; out of grid = absent).
+        let buildableOk =
+          buildable |> CellGrid2D.get x y |> ValueOption.exists _.Buildable
+
+        if not buildableOk then
+          AVal.constant PlacementStatus.Blocked
+        else
           let cellKey = struct (x, y)
 
           towers.CellIndex
           |> AMap.tryFind cellKey
           |> AVal.map2
             (fun gold occupied ->
-              if occupied.IsSome then
+              if ValueOption.isSome occupied then
                 PlacementStatus.Blocked
               elif gold >= TowerDefs.arrow.Cost then
                 PlacementStatus.Affordable

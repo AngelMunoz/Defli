@@ -68,7 +68,7 @@ module Diagnostics =
   let inline tickStart() : int64 = Stopwatch.GetTimestamp()
 
   /// Counts one update-loop Tick (rate computed at window refresh).
-  let update(diag: FrameDiag) =
+  let inline update(diag: FrameDiag) =
     diag.WindowUpdates <- diag.WindowUpdates + 1L
 
   /// Samples one rendered frame and refreshes the windowed rates/display
@@ -77,7 +77,9 @@ module Diagnostics =
   let drawn (stamp: int64) (diag: FrameDiag) =
     if diag.LastDrawStamp <> 0L then
       let ms =
-        float32(Stopwatch.GetElapsedTime(diag.LastDrawStamp, stamp).TotalMilliseconds)
+        float32(
+          Stopwatch.GetElapsedTime(diag.LastDrawStamp, stamp).TotalMilliseconds
+        )
 
       if ms > 0f then
         diag.PendingWorstMs <- max diag.PendingWorstMs ms
@@ -107,17 +109,11 @@ module Diagnostics =
   /// Folds one RoomTick into the world diagnostics: windowed tick rate,
   /// sim cost EMA, live counts. t0 is the tickStart() stamp; alive/queue
   /// are the direct values already computed by the router this tick.
-  let tickEnd
-    (t0: int64)
-    (diag: WorldDiag)
-    (alive: int)
-    (queue: int)
-    =
+  let tickEnd (t0: int64) (diag: WorldDiag) (alive: int) (queue: int) =
     let now = Stopwatch.GetTimestamp()
     diag.TickCount <- diag.TickCount + 1L
 
-    let simMs =
-      float32(Stopwatch.GetElapsedTime(t0, now).TotalMilliseconds)
+    let simMs = float32(Stopwatch.GetElapsedTime(t0, now).TotalMilliseconds)
 
     diag.SimMs <- diag.SimMs * 0.9f + simMs * 0.1f
     diag.AliveEnemies <- alive
@@ -150,11 +146,27 @@ module DiagnosticsViewExtensions =
       (font: Font, diag: FrameDiag, at: Vector2)
       : RenderBuffer2D =
       let yellow = Mibo.Color.rgb 255uy 210uy 0uy
-      buffer.text(font, diag.Display, at, 18f, tint = yellow, layer = Layers.Hud)
+
+      buffer.text(
+        font,
+        diag.Display,
+        at,
+        18f,
+        tint = yellow,
+        layer = Layers.Hud
+      )
 
     /// Draws the world-diagnostics line (gated like frameDiagnostics).
     member inline buffer.worldDiagnostics
       (font: Font, diag: WorldDiag, at: Vector2)
       : RenderBuffer2D =
       let yellow = Mibo.Color.rgb 255uy 210uy 0uy
-      buffer.text(font, diag.Display, at, 18f, tint = yellow, layer = Layers.Hud)
+
+      buffer.text(
+        font,
+        diag.Display,
+        at,
+        18f,
+        tint = yellow,
+        layer = Layers.Hud
+      )

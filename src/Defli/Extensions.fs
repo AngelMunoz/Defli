@@ -54,6 +54,11 @@ module ValueOption =
     | ValueSome v1, ValueSome v2 -> binder v1 v2
     | _ -> ValueNone
 
+  let inline iter2 ([<InlineIfLambda>] action) v1 v2 =
+    match struct (v1, v2) with
+    | ValueSome v1, ValueSome v2 -> action v1 v2
+    | _ -> ()
+
 [<AutoOpen>]
 module Patterns =
   open System.Collections.Generic

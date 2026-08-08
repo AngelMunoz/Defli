@@ -24,11 +24,7 @@ open Defli.World
 
 [<Struct>]
 type ProjectileMsg =
-  | Spawn of
-    pos: Vector2 *
-    target: int<EnemyId> *
-    damage: int *
-    speed: float32
+  | Spawn of pos: Vector2 * target: int<EnemyId> * damage: int * speed: float32
 
 [<Struct>]
 type ProjectileEvent =
@@ -80,7 +76,10 @@ module Projectiles =
     (positions: IReadOnlyDictionary<int<EnemyId>, Vector2>)
     : struct (ProjectilesModel * ProjectileEvent seq) =
     let mutable events: ResizeArray<ProjectileEvent> = null
-    let mutable updates: ResizeArray<struct (int<ProjectileId> * ProjectileRow)> = null
+
+    let mutable updates: ResizeArray<struct (int<ProjectileId> * ProjectileRow)> =
+      null
+
     let mutable removes: ResizeArray<int<ProjectileId>> = null
 
     for KeyValueV(pid, row) in model.Rows |> AMap.getValue do
@@ -92,14 +91,14 @@ module Projectiles =
 
         removes.Add pid
       else
-        match positions.TryGetValue(row.TargetEnemy) with
-        | false, _ ->
+        match positions |> ReadOnlyDict.tryGetValue row.TargetEnemy with
+        | ValueNone ->
           // Target despawned mid-flight — nothing left to hit.
           if isNull removes then
             removes <- ResizeArray()
 
           removes.Add pid
-        | true, targetPos ->
+        | ValueSome targetPos ->
           let d = targetPos - row.Pos
           let dist = d.Length()
           let step = row.Speed * dt
@@ -118,11 +117,13 @@ module Projectiles =
             if isNull updates then
               updates <- ResizeArray()
 
-            updates.Add struct (pid, {
-              row with
-                  Pos = row.Pos + (d / dist) * step
-                  Lifetime = lifetime
-            })
+            updates.Add
+              struct (pid,
+                      {
+                        row with
+                            Pos = row.Pos + (d / dist) * step
+                            Lifetime = lifetime
+                      })
 
     if not(isNull updates) then
       for struct (pid, row) in updates do

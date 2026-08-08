@@ -39,19 +39,19 @@ type VfxPool(capacity: int) =
   member val Count = 0 with get, set
 
 type VfxModel() =
-  member val Impact = VfxPool(256) with get, set
-  member val DeathPoof = VfxPool(256) with get, set
-  member val Muzzle = VfxPool(128) with get, set
+  member val Impact = VfxPool 256 with get, set
+  member val DeathPoof = VfxPool 256 with get, set
+  member val Muzzle = VfxPool 128 with get, set
 
 [<Struct>]
-type VfxMsg = | Burst of kind: VfxKind * pos: Vector2
+type VfxMsg = Burst of kind: VfxKind * pos: Vector2
 
 module Vfx =
 
   let init() = VfxModel()
 
   /// Per-kind spawn parameters: count, base speed, size, fade speed.
-  let private paramsOf(kind: VfxKind) =
+  let inline private paramsOf(kind: VfxKind) =
     match kind with
     | Impact -> struct (8, 140f, 12f, 150f)
     | DeathPoof -> struct (6, 50f, 24f, 60f)
@@ -63,6 +63,7 @@ module Vfx =
     match msg with
     | Burst(kind, pos) ->
       let struct (count, speed, size, _) = paramsOf kind
+
       let pool =
         match kind with
         | Impact -> model.Impact
@@ -72,8 +73,8 @@ module Vfx =
       let mutable i = 0
 
       while i < count && pool.Count < pool.Particles.Length do
-        let angle = (float32 i / float32 count) * 2f * MathF.PI
-        let tier = float32 (i % 3 + 1)
+        let angle = float32 i / float32 count * 2f * MathF.PI
+        let tier = float32(i % 3 + 1)
         let dir = Vector2(MathF.Cos angle, MathF.Sin angle)
         let velocity = dir * (speed * tier)
 
@@ -90,65 +91,69 @@ module Vfx =
         pool.Count <- pool.Count + 1
         i <- i + 1
 
+  let inline private stepPool dt (pool: VfxPool) (fadeSpeed: float32) =
+    for i in 0 .. pool.Count - 1 do
+      let p = pool.Particles[i]
+
+      pool.Particles[i] <-
+        {
+          p with
+              Position = p.Position + pool.Velocities[i] * dt
+        }
+
+    let fadeAmount = fadeSpeed * dt
+    let mutable write = 0
+
+    for read in 0 .. pool.Count - 1 do
+      let p = pool.Particles[read]
+      let newAlpha = max 0uy (byte(float32 p.Color.A - fadeAmount))
+
+      if newAlpha > 0uy then
+        let c = Color(p.Color.R, p.Color.G, p.Color.B, newAlpha)
+        pool.Particles[write] <- { p with Color = c }
+        pool.Velocities[write] <- pool.Velocities[read]
+        write <- write + 1
+
+    pool.Count <- write
+
   /// Hot path: integrate velocities, fade, compact (in place, zero alloc).
   /// Velocities are compacted in parallel with the particles.
   let tick (dt: float32) (model: VfxModel) : unit =
-    let stepPool (pool: VfxPool) (fadeSpeed: float32) =
-      for i in 0 .. pool.Count - 1 do
-        let p = pool.Particles[i]
-        pool.Particles[i] <- { p with Position = p.Position + pool.Velocities[i] * dt }
-
-      let fadeAmount = fadeSpeed * dt
-      let mutable write = 0
-
-      for read in 0 .. pool.Count - 1 do
-        let p = pool.Particles[read]
-        let newAlpha = max 0uy (byte (float32 p.Color.A - fadeAmount))
-
-        if newAlpha > 0uy then
-          let c = Color(p.Color.R, p.Color.G, p.Color.B, newAlpha)
-          pool.Particles[write] <- { p with Color = c }
-          pool.Velocities[write] <- pool.Velocities[read]
-          write <- write + 1
-
-      pool.Count <- write
-
     let struct (_, _, _, fadeImpact) = paramsOf VfxKind.Impact
     let struct (_, _, _, fadeDeath) = paramsOf VfxKind.DeathPoof
     let struct (_, _, _, fadeMuzzle) = paramsOf VfxKind.Muzzle
-    stepPool model.Impact fadeImpact
-    stepPool model.DeathPoof fadeDeath
-    stepPool model.Muzzle fadeMuzzle
+    stepPool dt model.Impact fadeImpact
+    stepPool dt model.DeathPoof fadeDeath
+    stepPool dt model.Muzzle fadeMuzzle
 
   // ── View (one .particles draw call per kind/texture) ──
 
   /// Texture per kind (kenney_particle_pack).
-  let private textureOf(kind: VfxKind) =
+  let inline private textureOf(kind: VfxKind) =
     match kind with
     | Impact -> "kenney_particle_pack/spark_01.png"
     | DeathPoof -> "kenney_particle_pack/smoke_01.png"
     | Muzzle -> "kenney_particle_pack/muzzle_01.png"
 
-  let view
-    (ctx: GameContext)
-    (model: VfxModel)
-    (buffer: RenderBuffer2D)
-    =
+  let inline drawPool (kind: VfxKind) (pool: VfxPool) (assets: IAssets) buffer =
+    if pool.Count > 0 then
+      let tex = assets.Texture(textureOf kind)
+      let full = Rectangle(0f, 0f, float32 tex.Width, float32 tex.Height)
+
+      // Patch the full-texture source rect (the pool stores placeholders).
+      for i in 0 .. pool.Count - 1 do
+        pool.Particles[i] <-
+          {
+            pool.Particles[i] with
+                SourceRect = full
+          }
+
+      buffer
+        .particles(tex, pool.Particles, pool.Count, layer = Layers.Effects)
+        .drop()
+
+  let view (ctx: GameContext) (model: VfxModel) (buffer: RenderBuffer2D) =
     let assets = GameContext.getService<IAssets> ctx
-
-    let drawPool (kind: VfxKind) (pool: VfxPool) =
-      if pool.Count > 0 then
-        let tex = assets.Texture(textureOf kind)
-        let full = Rectangle(0f, 0f, float32 tex.Width, float32 tex.Height)
-
-        // Patch the full-texture source rect (the pool stores placeholders).
-        for i in 0 .. pool.Count - 1 do
-          pool.Particles[i] <- { pool.Particles[i] with SourceRect = full }
-
-        buffer
-          .particles(tex, pool.Particles, pool.Count, layer = Layers.Effects)
-          .drop()
-
-    drawPool VfxKind.Impact model.Impact
-    drawPool VfxKind.DeathPoof model.DeathPoof
-    drawPool VfxKind.Muzzle model.Muzzle
+    drawPool VfxKind.Impact model.Impact assets buffer
+    drawPool VfxKind.DeathPoof model.DeathPoof assets buffer
+    drawPool VfxKind.Muzzle model.Muzzle assets buffer

@@ -77,7 +77,7 @@ module Spawning =
       for _ in 1 .. wave.Count do
         match pickKey model.Rng wave.Table with
         | ValueSome def ->
-          queue.Add(struct (def, delay))
+          queue.Add struct (def, delay)
           delay <- delay + wave.Interval
         | ValueNone -> failed <- true
 

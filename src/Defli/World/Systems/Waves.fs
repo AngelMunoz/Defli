@@ -33,9 +33,9 @@ module Waves =
     |> AVal.map2
       (fun number active ->
         if active then
-          sprintf "Wave %d" number
+          $"Wave %d{number}"
         else
-          sprintf "Press Enter — Wave %d" (number + 1))
+          $"Press Enter — Wave %d{number + 1}")
       m.WaveNumber
 
   let init() : WavesModel =
@@ -101,7 +101,7 @@ module Waves =
     (model: WavesModel)
     (aliveCount: int)
     (queueEmpty: bool)
-    : struct (WavesModel * WaveEvent[]) =
+    : struct (WavesModel * WaveEvent seq) =
     if model.WaveActive.Value then
       if aliveCount = 0 && queueEmpty then
         model.WaveActive.Set false

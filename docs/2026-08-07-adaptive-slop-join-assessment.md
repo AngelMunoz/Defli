@@ -106,3 +106,46 @@ dotnet fsi tools/analyze-trace.fsx trace.speedscope.json
 
 The analyzer file is `tools/analyze-trace.fsx`. It reproduces all tables in
 this document from a new capture.
+
+## 9. Phase-3 Follow-up (start → wave ~11, 2026-08-07)
+
+A 247.7 s capture of the Phase-3 build (flier archetype, targeting
+policies, wave director).
+
+| Fact | Value |
+| --- | --- |
+| Game CPU busy time | 0.9 % of wall time (2.2 s of 247.7 s) |
+| AdaptiveSlop busy time | 53.6 % of busy time (0.5 % of wall time) |
+| AdaptiveSlop samples per second | ~4 /s — flat vs every earlier capture |
+| AdaptiveSlop CPU per frame | ~65 µs |
+| Longest CPU-busy run | 5.6 ms (startup) — no CPU-side hitches exist |
+| zeroCreate samples (per-element nodes) | ~296 across the session |
+| String samples: AssetsService.Texture / HUD sprintf | 105 / 25 |
+
+Reading:
+
+- The 53.6 % "dominance" is a quiet-session ratio artifact: with few
+  enemies the adaptive chain is almost the only busy work. The absolute
+  cost is unchanged (~4 samples/s, ~0.5 % of wall). The reactive data is
+  NOT the constraint — not yet.
+- The allocation drip is the item to watch: ~296 sampled array
+  allocations, all on the per-element recompute path (`tryFind` nodes
+  for Motion/Positions/Homing/Healths + `EnemyView` recompute). Linear
+  in entities; the predicted curve holds.
+- The view path still builds strings per frame (asset-texture lookups,
+  HUD formatting) — housekeeping, not a reactive cost.
+
+Hitch investigation (same session):
+
+- The player saw worst-ms spikes around tick ~6000. The sampled trace
+  cannot see them: gaps between samples are wall-clock sampling noise of
+  a 0.9 %-duty thread (the gap distribution matches the geometric model
+  exactly), and no busy run exceeds 5.6 ms — so the hitches are native
+  blocks, invisible to this instrument by construction. The before/after
+  stacks show no operation pattern.
+- A run WITHOUT the trace collector attached was smooth — the collector
+  (EventPipe attach/backpressure) was the cause, not the game. The F3
+  worst-ms column is the ground-truth frame-time indicator.
+
+Verdict: keep an eye on the allocation rate as entity counts grow, but
+nothing is near the frame budget. We are not dead in the water.

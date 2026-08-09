@@ -179,12 +179,17 @@ module Application =
         model.Diag.Visible <- not model.Diag.Visible
 
       // Restart: only from the game-over state (misclicks must not
-      // wipe a run) — fresh world from the same config.
+      // wipe a run) — fresh world from the same config. The new
+      // camera's screen offset is a render-time fact the sim can't
+      // know (init leaves it Zero), so re-apply the viewport here
+      // just like boot — otherwise the world center pins to (0,0)
+      // and only a quarter of the map is visible.
       if
         started.Contains GameAction.Restart
         && AVal.getValue model.World.Economy.GameOver
       then
         model.World <- World.init WorldConfig.defaults
+        Camera.Camera.setViewport model.Viewport model.World.Camera
 
       let cmd =
         if started.Contains GameAction.StartNextWave then

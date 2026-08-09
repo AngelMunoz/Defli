@@ -257,11 +257,16 @@ type TowerDef = {
   ProjectileSpeed: float32
   /// Head sprite name in the Tiles sheet (drawn over turretBaseA).
   Sprite: string
+  /// Projectile sprite name in the Tiles sheet (the shell/rocket).
+  ProjectileSprite: string
   TargetPolicy: TargetPolicy
   /// Slow applied by this tower's projectiles: 1 = no slow, < 1 = the
   /// enemy's speed factor for SlowSeconds (frost tower).
   SlowFactor: float32
   SlowSeconds: float32
+  /// Blast radius in world pixels (cannon): every enemy within this
+  /// distance of the impact point takes full Damage. 0 = single-target.
+  SplashRadius: float32
   /// Gold cost per upgrade level (flat) and the level cap.
   UpgradeCost: int
   MaxLevel: int
@@ -278,9 +283,11 @@ module TowerDefs =
     FireRate = 2.25f
     ProjectileSpeed = 240f
     Sprite = "rocket_pod_single"
+    ProjectileSprite = "rocket_small"
     TargetPolicy = TargetPolicy.First
     SlowFactor = 1f
     SlowSeconds = 0f
+    SplashRadius = 0f
     UpgradeCost = 40
     MaxLevel = 5
   }
@@ -296,14 +303,37 @@ module TowerDefs =
     FireRate = 1.5f
     ProjectileSpeed = 200f
     Sprite = "rocket_pod_dual"
+    ProjectileSprite = "rocket_small"
     TargetPolicy = TargetPolicy.Weakest
     SlowFactor = 0.5f
     SlowSeconds = 2f
+    SplashRadius = 0f
     UpgradeCost = 60
     MaxLevel = 5
   }
 
-  let all = [| arrow; frost |]
+  /// Cannon — slow, expensive, area damage: the shell detonates at the
+  /// impact point and every enemy within SplashRadius (1.5 tiles) takes
+  /// full damage. The pack counter (and the boss answer, later).
+  let cannon = {
+    Key = "cannon"
+    Name = "Cannon"
+    Cost = 120
+    Range = 3
+    Damage = 25
+    FireRate = 0.6f
+    ProjectileSpeed = 160f
+    Sprite = "turret_red_dual"
+    ProjectileSprite = "rocket_large"
+    TargetPolicy = TargetPolicy.Strongest
+    SlowFactor = 1f
+    SlowSeconds = 0f
+    SplashRadius = 96f
+    UpgradeCost = 100
+    MaxLevel = 5
+  }
+
+  let all = [| arrow; frost; cannon |]
 
   /// The upgrade formula (pure): +25 % damage, +10 % fire rate, +0.5
   /// range per level over the base def. Level 1 = the base def.
@@ -344,12 +374,21 @@ type TowerRuntime = {
 type ProjectileRow = {
   Pos: Vector2
   TargetEnemy: int<EnemyId>
+  /// The target's last recorded position. Live-tracked while the
+  /// target is alive; when the target despawns mid-flight the shot
+  /// flies on to THIS point and detonates there (no mid-air pop —
+  /// splash shells still blast the pack around the corpse).
+  LastTargetPos: Vector2
   Damage: int
   Speed: float32
   Lifetime: float32
   /// Slow applied on impact (1 = none; copied from the TowerDef).
   SlowFactor: float32
   SlowSeconds: float32
+  /// Blast radius in world pixels (0 = single-target; from the def).
+  SplashRadius: float32
+  /// Shell sprite name in the Tiles sheet (from the def).
+  ProjectileSprite: string
 }
 
 /// Spawn intent for a projectile — the shot's definitional content
@@ -359,10 +398,14 @@ type ProjectileRow = {
 type ProjectileSpawn = {
   Pos: Vector2
   TargetEnemy: int<EnemyId>
+  /// Seeded by the router from the target's live position at fire time.
+  LastTargetPos: Vector2
   Damage: int
   Speed: float32
   SlowFactor: float32
   SlowSeconds: float32
+  SplashRadius: float32
+  ProjectileSprite: string
 }
 
 /// Difficulty scaling per wave tier (every 5 waves the enemies get
@@ -406,9 +449,13 @@ type TowerShot = {
   Damage: int
   SlowFactor: float32
   SlowSeconds: float32
+  SplashRadius: float32
+  ProjectileSprite: string
 }
 
 /// A projectile impact (ProjectileEvent.Impact payload) — what hit.
+/// Pos is the detonation point; on a splash hit the router fans out
+/// one ApplyDamage per enemy within SplashRadius of it.
 [<Struct>]
 type ProjectileImpact = {
   Projectile: int<ProjectileId>
@@ -417,6 +464,7 @@ type ProjectileImpact = {
   Pos: Vector2
   SlowFactor: float32
   SlowSeconds: float32
+  SplashRadius: float32
 }
 
 /// A slow application (EnemyMsg.ApplySlow payload) — factor + expiry.
@@ -428,9 +476,14 @@ type SlowApply = {
 }
 
 /// Render row of the world-owned Homing projection
-/// (Projectiles.Rows × Enemies.Positions).
+/// (Projectiles.Rows × Enemies.Positions). TargetPos is the target's
+/// live position while it lives, the row's LastTargetPos after.
 [<Struct>]
-type HomingView = { Pos: Vector2; TargetPos: Vector2 }
+type HomingView = {
+  Pos: Vector2
+  TargetPos: Vector2
+  Sprite: string
+}
 
 // ─────────────────────────────────────────────────────────────
 // Placement preview (hover highlight state)

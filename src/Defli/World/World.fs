@@ -162,23 +162,42 @@ module World =
       for ev in events do
         match ev with
         | Towers.Fired shot ->
+          // Muzzle pos from the static row; projectile speed from the
+          // EFFECTIVE def (the upgrade projection) — the +10 %/level
+          // fire-rate/range upgrades must not be dropped here.
           let struct (pos, speed) =
             model.Towers.Statics
             |> CMap.tryGetValue shot.Tower
             |> ValueOption.map(fun s ->
-              struct (Cells.center s.Cell (cellSize model),
-                      s.Def.ProjectileSpeed))
+              let eff =
+                model.Towers.EffectiveDef
+                |> AMap.getValue
+                |> ReadOnlyDict.tryGetValue shot.Tower
+                |> ValueOption.defaultValue s.Def
+
+              struct (Cells.center s.Cell (cellSize model), eff.ProjectileSpeed))
             |> ValueOption.defaultValue struct (Vector2.Zero, 0f)
+
+          // Seed the shot's last-known target position from the live
+          // row (fall back to the muzzle): a target that dies
+          // mid-flight still gets detonated on.
+          let lastTargetPos =
+            model.Enemies.Positions
+            |> CMap.tryGetValue shot.Enemy
+            |> ValueOption.defaultValue pos
 
           Cmd.ofMsg(
             ProjectilesMsg(
               Projectiles.Spawn {
                 Pos = pos
                 TargetEnemy = shot.Enemy
+                LastTargetPos = lastTargetPos
                 Damage = shot.Damage
                 Speed = speed
                 SlowFactor = shot.SlowFactor
                 SlowSeconds = shot.SlowSeconds
+                SplashRadius = shot.SplashRadius
+                ProjectileSprite = shot.ProjectileSprite
               }
             )
           )
@@ -187,26 +206,41 @@ module World =
     |]
 
   let private translateProjectileEvents
+    (model: WorldModel)
     (events: Projectiles.ProjectileEvent seq)
     : Cmd<WorldMsg>[] =
     [|
       for ev in events do
         match ev with
         | Projectiles.Impact impact ->
-          Cmd.ofMsg(EnemyMsg(Enemies.ApplyDamage(impact.Enemy, impact.Damage)))
+          if impact.SplashRadius > 0f then
+            // Splash: the blast fans out from the DETONATION POINT to
+            // every enemy within radius (flat full damage, no falloff).
+            // Each ApplyDamage zero-crossing emits its own Killed →
+            // gold + DeathPoof via translateEnemyEvents. A transient
+            // read of Positions — cold path, once per impact.
+            let positions = model.Enemies.Positions |> AMap.getValue
 
-          if impact.SlowFactor < 1f then
-            Cmd.ofMsg(
-              EnemyMsg(
-                Enemies.ApplySlow {
-                  Enemy = impact.Enemy
-                  Factor = impact.SlowFactor
-                  Seconds = impact.SlowSeconds
-                }
+            for KeyValueV(eid, epos) in positions do
+              if Vector2.Distance(epos, impact.Pos) <= impact.SplashRadius then
+                Cmd.ofMsg(EnemyMsg(Enemies.ApplyDamage(eid, impact.Damage)))
+
+            Cmd.ofMsg(VfxMsg(Vfx.Burst(Vfx.VfxKind.Explosion, impact.Pos)))
+          else
+            Cmd.ofMsg(EnemyMsg(Enemies.ApplyDamage(impact.Enemy, impact.Damage)))
+
+            if impact.SlowFactor < 1f then
+              Cmd.ofMsg(
+                EnemyMsg(
+                  Enemies.ApplySlow {
+                    Enemy = impact.Enemy
+                    Factor = impact.SlowFactor
+                    Seconds = impact.SlowSeconds
+                  }
+                )
               )
-            )
 
-          Cmd.ofMsg(VfxMsg(Vfx.Burst(Vfx.VfxKind.Impact, impact.Pos)))
+            Cmd.ofMsg(VfxMsg(Vfx.Burst(Vfx.VfxKind.Impact, impact.Pos)))
     |]
 
   /// Router — dispatch + translate only. No game logic.
@@ -253,7 +287,7 @@ module World =
         yield! translateSpawnEvents spawnEvents
         yield! translateWaveEvents model.Config.WaveClearBonus waveEvents model
         yield! translateTowerEvents model towerEvents
-        yield! translateProjectileEvents projectileEvents
+        yield! translateProjectileEvents model projectileEvents
       |]
     | StartNextWave ->
       if AVal.getValue model.Economy.GameOver then
@@ -342,7 +376,7 @@ module World =
       let struct (_, events) =
         Projectiles.Projectiles.update m model.Projectiles
 
-      model, Cmd.batch(translateProjectileEvents events)
+      model, Cmd.batch(translateProjectileEvents model events)
     | VfxMsg m ->
       Vfx.Vfx.update m model.Vfx
       model, Cmd.none
@@ -453,7 +487,7 @@ module World =
     buffer
       .text(
         font,
-        $"Gold: %d{gold}   Lives: %d{lives}   %s{banner}   Tower: %s{def.Name} (1/2)",
+        $"Gold: %d{gold}   Lives: %d{lives}   %s{banner}   Tower: %s{def.Name} (1/2/3)",
         Vector2(12f, 10f),
         22f,
         layer = Layers.Hud

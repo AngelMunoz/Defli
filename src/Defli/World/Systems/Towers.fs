@@ -169,12 +169,16 @@ module Towers =
               Damage = def.Damage
               SlowFactor = def.SlowFactor
               SlowSeconds = def.SlowSeconds
+              SplashRadius = def.SplashRadius
+              ProjectileSprite = def.ProjectileSprite
             }
           )
 
+          // Cooldown from the EFFECTIVE def (Statics × Levels): the
+          // +10 %/level fire-rate upgrade must actually apply.
           model.Runtimes
           |> CMap.addOrUpdate tid {
-            Cooldown = 1f / max 0.1f s.Def.FireRate
+            Cooldown = 1f / max 0.1f def.FireRate
             Target = ValueSome eid
           }
         | ValueNone ->

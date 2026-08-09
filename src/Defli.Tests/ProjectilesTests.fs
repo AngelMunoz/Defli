@@ -29,10 +29,13 @@ let private spawnAt (m: ProjectilesModel) (pos: Vector2) =
       (ProjectileMsg.Spawn {
         Pos = pos
         TargetEnemy = target
+        LastTargetPos = pos
         Damage = 5
         Speed = 100f
         SlowFactor = 1f
         SlowSeconds = 0f
+        SplashRadius = 0f
+        ProjectileSprite = "rocket_small"
       })
       m
 
@@ -46,10 +49,13 @@ let tests =
           (ProjectileMsg.Spawn {
             Pos = Vector2.Zero
             TargetEnemy = target
+            LastTargetPos = Vector2.Zero
             Damage = 5
             Speed = 100f
             SlowFactor = 1f
             SlowSeconds = 0f
+            SplashRadius = 0f
+            ProjectileSprite = "rocket_small"
           })
           (model())
 
@@ -95,10 +101,13 @@ let tests =
           (ProjectileMsg.Spawn {
             Pos = Vector2(10f, 0f)
             TargetEnemy = target
+            LastTargetPos = Vector2(10f, 0f)
             Damage = 4
             Speed = 200f
             SlowFactor = 0.5f
             SlowSeconds = 2f
+            SplashRadius = 0f
+            ProjectileSprite = "rocket_small"
           })
           m
 
@@ -120,15 +129,82 @@ let tests =
 
       Expect.equal ((m3.Rows |> AMap.getValue).Count) 0 "removed on impact")
 
-    testCase "target despawned mid-flight → row removed, no impact" (fun () ->
+    testCase "target despawned mid-flight → detonates at the last recorded position" (fun () ->
       let mutable m = model()
       m <- spawnAt m (Vector2(0f, 0f))
 
-      let struct (m2, events) =
-        Projectiles.tick 0.1f m (Dictionary<int<EnemyId>, Vector2>())
+      // One tick with the target alive at (50,0): the shot moves 10 px
+      // and records the live position.
+      let struct (m2, _) =
+        Projectiles.tick 0.1f m (positionsAt(Vector2(50f, 0f)))
 
-      Expect.isEmpty events "no impact"
-      Expect.equal ((m2.Rows |> AMap.getValue).Count) 0 "removed")
+      match m2.Rows |> CMap.tryGetValue(0<ProjectileId>) with
+      | ValueSome row ->
+        Expect.equal row.LastTargetPos (Vector2(50f, 0f)) "live pos recorded"
+      | ValueNone -> failtest "row must exist"
+
+      // Target despawns: the shot keeps flying (no mid-air pop).
+      let struct (m3, events) =
+        Projectiles.tick 0.1f m2 (Dictionary<int<EnemyId>, Vector2>())
+
+      Expect.isEmpty events "no impact yet"
+      Expect.equal ((m3.Rows |> AMap.getValue).Count) 1 "still flying"
+
+      match m3.Rows |> CMap.tryGetValue(0<ProjectileId>) with
+      | ValueSome row ->
+        Expect.equal row.Pos.X 20f "advanced toward the last pos"
+        Expect.equal row.LastTargetPos (Vector2(50f, 0f)) "last pos kept"
+      | ValueNone -> failtest "row must exist"
+
+      // Enough time to cover the remaining 30 px → detonation, with the
+      // DEAD target's id on the impact (the router no-ops its damage;
+      // a splash payload would blast the point).
+      let struct (m4, events2) =
+        Projectiles.tick 1.0f m3 (Dictionary<int<EnemyId>, Vector2>())
+
+      match events2 |> Seq.toArray with
+      | [| Impact impact |] ->
+        Expect.equal impact.Enemy target "dead target id"
+        Expect.equal impact.Pos.X 20f "detonated on arrival"
+      | _ -> failtest "expected exactly one Impact"
+
+      Expect.equal ((m4.Rows |> AMap.getValue).Count) 0 "removed on detonation")
+
+    testCase "spawn carries the splash payload to Impact" (fun () ->
+      let mutable m = model()
+
+      let struct (m', _) =
+        Projectiles.update
+          (ProjectileMsg.Spawn {
+            Pos = Vector2(10f, 0f)
+            TargetEnemy = target
+            LastTargetPos = Vector2(10f, 0f)
+            Damage = 25
+            Speed = 200f
+            SlowFactor = 1f
+            SlowSeconds = 0f
+            SplashRadius = 96f
+            ProjectileSprite = "rocket_large"
+          })
+          m
+
+      m <- m'
+
+      match m.Rows |> CMap.tryGetValue(0<ProjectileId>) with
+      | ValueSome row ->
+        Expect.equal row.SplashRadius 96f "row splash"
+        Expect.equal row.ProjectileSprite "rocket_large" "row sprite"
+      | ValueNone -> failtest "row must exist"
+
+      let struct (m2, _) =
+        Projectiles.tick 0.01f m (positionsAt(Vector2(50f, 0f)))
+
+      let struct (_, events) =
+        Projectiles.tick 1.0f m2 (positionsAt(Vector2(50f, 0f)))
+
+      match events |> Seq.toArray with
+      | [| Impact impact |] -> Expect.equal impact.SplashRadius 96f "impact splash"
+      | _ -> failtest "expected exactly one Impact")
 
     testCase "lifetime expiry removes the row" (fun () ->
       let mutable m = model()
@@ -194,10 +270,18 @@ let tests =
             (map.Path[0].X + 90f |> fun x -> Vector2(x, map.Path[0].Y))
             "tracked movement"
 
-        // Kill the enemy (despawn): the homing entry DROPS (chooseA).
+        // Kill the enemy (despawn): the homing entry STAYS — the render
+        // row falls back to the projectile's LastTargetPos (the sim
+        // flies the shot to the detonation point; no render-side pop).
         let struct (enemies3, _) =
           Enemies.Enemies.update (EnemyMsg.Despawn eid) enemies2 map.Path
 
         let rows3 = projections.Homing |> AMap.getValue
-        Expect.equal rows3.Count 0 "entry dropped with the target")
+        Expect.equal rows3.Count 1 "entry kept with the last recorded pos"
+
+        for KeyValueV(pid, v) in rows3 do
+          Expect.equal
+            v.TargetPos
+            Vector2.Zero
+            "falls back to the row's LastTargetPos")
   ]

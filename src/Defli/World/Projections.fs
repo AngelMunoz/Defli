@@ -37,17 +37,20 @@ type Projections
 
   /// #3 Homing — one aval per projectile tracking its target's live
   /// position row through the graph. A dead target (row removed from
-  /// Enemies.Positions) yields ValueNone ⇒ chooseA drops the entry:
-  /// the render side stops drawing it while the sim expires the row.
+  /// Enemies.Positions) falls back to the projectile row's
+  /// LastTargetPos: the render side keeps drawing the shot flying to
+  /// the detonation point (the sim no longer removes it mid-flight).
   member val Homing: amap<int<ProjectileId>, HomingView> =
     projectiles.Rows
-    |> AMap.chooseA(fun _ row ->
+    |> AMap.mapA(fun _ row ->
       enemies.Positions
       |> AMap.tryFind row.TargetEnemy
       |> AVal.map(fun pos ->
-        pos
-        |> ValueOption.map(fun p -> { Pos = row.Pos; TargetPos = p })
-        |> ValueOption.toOption))
+        {
+          Pos = row.Pos
+          TargetPos = pos |> ValueOption.defaultValue row.LastTargetPos
+          Sprite = row.ProjectileSprite
+        }))
 
   /// #10 RangeRing — hovered own tower → its EFFECTIVE def (the view
   /// draws the range circle). The chain composes derived-on-derived:

@@ -318,4 +318,95 @@ let tests =
 
         Expect.isTrue slowed.IsSome "slow timer running"
       | ValueNone -> failtest "enemy must exist")
+
+    // ── Phase 5: cannon splash through the router ──
+
+    testCase "cannon splash kills a stacked pack, gold per victim" (fun () ->
+      let runner = TestData.mkRunner cfg
+
+      // Cannon costs 120 > StartingGold 100 — top up first.
+      runner.Dispatch(WorldMsg.EconomyMsg(EconomyMsg.EarnGold 60))
+      runner.Dispatch(WorldMsg.SelectTower TowerDefs.cannon)
+      runner.Dispatch(WorldMsg.PlaceTower(struct (1, 3)))
+      runner.StepN(2, TestData.dt)
+
+      // Two runners stacked on the same path cell (identical motion).
+      runner.Dispatch(
+        WorldMsg.EnemyMsg(Enemies.EnemyMsg.Spawn TestData.Fixtures.runner)
+      )
+
+      runner.Dispatch(
+        WorldMsg.EnemyMsg(Enemies.EnemyMsg.Spawn TestData.Fixtures.runner)
+      )
+
+      runner.StepN(2, TestData.dt)
+
+      // One shell (25 dmg > 10 hp): the blast kills BOTH.
+      let cleared =
+        runner.StepUntil(
+          (fun m -> AVal.getValue m.Enemies.AliveCount = 0),
+          TestData.dt,
+          120
+        )
+
+      Expect.isTrue cleared "pack died to the splash within budget"
+
+      Expect.equal
+        (goldOf runner.Model)
+        (cfg.StartingGold + 60 - TowerDefs.cannon.Cost
+         + 2 * TestData.Fixtures.runner.GoldReward)
+        "both kills rewarded")
+
+    testCase "target dies mid-flight: the shell detonates and splashes the pack" (fun () ->
+      let runner = TestData.mkRunner cfg
+
+      runner.Dispatch(WorldMsg.EconomyMsg(EconomyMsg.EarnGold 60))
+      runner.Dispatch(WorldMsg.SelectTower TowerDefs.cannon)
+      runner.Dispatch(WorldMsg.PlaceTower(struct (1, 3)))
+      runner.StepN(2, TestData.dt)
+
+      runner.Dispatch(
+        WorldMsg.EnemyMsg(Enemies.EnemyMsg.Spawn TestData.Fixtures.runner)
+      )
+
+      runner.Dispatch(
+        WorldMsg.EnemyMsg(Enemies.EnemyMsg.Spawn TestData.Fixtures.runner)
+      )
+
+      // Wait for the cannon's shell to be in flight.
+      let fired =
+        runner.StepUntil(
+          (fun m -> (m.Projectiles.Rows |> AMap.getValue).Count > 0),
+          TestData.dt,
+          120
+        )
+
+      Expect.isTrue fired "cannon fired within budget"
+
+      // Kill the shell's target mid-flight (another tower's kill, say).
+      let target =
+        (runner.Model.Projectiles.Rows |> AMap.getValue)
+        |> Seq.head
+        |> fun (KeyValueV(_, row)) -> row.TargetEnemy
+
+      runner.Dispatch(
+        WorldMsg.EnemyMsg(Enemies.EnemyMsg.ApplyDamage(target, 999))
+      )
+
+      // The shell must NOT vanish: it flies to the corpse's last
+      // position and the blast takes out the stacked survivor.
+      let cleared =
+        runner.StepUntil(
+          (fun m -> AVal.getValue m.Enemies.AliveCount = 0),
+          TestData.dt,
+          120
+        )
+
+      Expect.isTrue cleared "survivor died to the detonation splash"
+
+      Expect.equal
+        (goldOf runner.Model)
+        (cfg.StartingGold + 60 - TowerDefs.cannon.Cost
+         + 2 * TestData.Fixtures.runner.GoldReward)
+        "manual kill + splash kill both rewarded")
   ]

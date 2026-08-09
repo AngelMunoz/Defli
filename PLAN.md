@@ -785,13 +785,15 @@ no new adaptive machinery needed.
 
 ### Phase 5 — Stretch
 - Tower upgrades (`Level` component map — projections compose on top), cannon
-  (splash), difficulty curve data.
+  (splash — **done**: the blast fans out from the detonation point; shots whose
+  target dies mid-flight fly on to the last recorded position and detonate
+  there), difficulty curve data.
 - **Procedural map generation (Level 2)**: obstacle scattering via
   `scatterStamp`, road carved from `findPath`, `floodFill` reachability
   validation — the `Grid2DSpatial` stress test. Optional tower LOS via
   `lineOfSight`; `iterVisible` tile culling with the `Camera2D`.
 - Optional: save/load (wave progress + high score — Kimo Phase 9 analog),
-  audio.
+  audio. **Deferred to later phases** (post-Phase 5).
 
 ## 11. AdaptiveSlop Performance Rules & Risks
 

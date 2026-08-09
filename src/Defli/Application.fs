@@ -23,6 +23,7 @@ type GameAction =
   | ToggleDiagnostics
   | SelectArrow
   | SelectFrost
+  | SelectCannon
   | Restart
   | ResetCamera
   | PanLeft
@@ -64,6 +65,7 @@ module Inputs =
     |> InputMap.key GameAction.ToggleDiagnostics KeyCode.F3
     |> InputMap.key GameAction.SelectArrow KeyCode.D1
     |> InputMap.key GameAction.SelectFrost KeyCode.D2
+    |> InputMap.key GameAction.SelectCannon KeyCode.D3
     |> InputMap.key GameAction.Restart KeyCode.R
     |> InputMap.key GameAction.ResetCamera KeyCode.Home
     |> InputMap.key GameAction.PanLeft KeyCode.A
@@ -198,6 +200,8 @@ module Application =
           Cmd.ofMsg(WorldMsg(WorldMsg.SelectTower TowerDefs.arrow))
         elif started.Contains GameAction.SelectFrost then
           Cmd.ofMsg(WorldMsg(WorldMsg.SelectTower TowerDefs.frost))
+        elif started.Contains GameAction.SelectCannon then
+          Cmd.ofMsg(WorldMsg(WorldMsg.SelectTower TowerDefs.cannon))
         elif started.Contains GameAction.ResetCamera then
           Cmd.ofMsg(WorldMsg(WorldMsg.CameraMsg Camera.Reset))
         else

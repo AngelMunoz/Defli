@@ -25,9 +25,11 @@ let private def = {
   FireRate = 4f
   ProjectileSpeed = 200f
   Sprite = "rocket_pod_single"
+  ProjectileSprite = "rocket_small"
   TargetPolicy = TargetPolicy.First
   SlowFactor = 1f
   SlowSeconds = 0f
+  SplashRadius = 0f
   UpgradeCost = 20
   MaxLevel = 5
 }
@@ -252,6 +254,50 @@ let tests =
         Expect.equal shot.SlowFactor TowerDefs.frost.SlowFactor "slow factor"
         Expect.equal shot.SlowSeconds TowerDefs.frost.SlowSeconds "slow seconds"
       | _ -> failtest "expected exactly one Fired")
+
+    testCase "cannon def → Fired carries the splash + shell payload" (fun () ->
+      let m = model()
+      let cell = struct (3, 3)
+
+      let struct (m', _) =
+        Towers.update (TowerMsg.Place(cell, TowerDefs.cannon)) m
+
+      let alive =
+        AMap.constant(fun () -> enemyAt (cellCenter struct (4, 3)) 0.5f)
+
+      let struct (_, events) = Towers.tick 0.1f m' alive cellSize
+
+      match events |> Seq.toArray with
+      | [| Fired shot |] ->
+        Expect.equal shot.SplashRadius TowerDefs.cannon.SplashRadius "splash"
+        Expect.equal
+          shot.ProjectileSprite
+          TowerDefs.cannon.ProjectileSprite
+          "shell sprite"
+      | _ -> failtest "expected exactly one Fired")
+
+    testCase "cooldown comes from the EFFECTIVE def (upgraded fire rate)" (fun () ->
+      let m = model()
+      let cell = struct (3, 3)
+
+      let struct (m', _) = Towers.update (TowerMsg.Place(cell, def)) m
+
+      // Level 2: +10 % fire rate → the cooldown must shrink.
+      let struct (m2, _) = Towers.update (TowerMsg.Upgrade(0<TowerId>)) m'
+
+      let alive =
+        AMap.constant(fun () -> enemyAt (cellCenter struct (4, 3)) 0.5f)
+
+      let struct (m3, events) = Towers.tick 0.1f m2 alive cellSize
+      Expect.equal (Seq.length events) 1 "fired"
+
+      match m3.Runtimes |> CMap.tryGetValue(0<TowerId>) with
+      | ValueSome r ->
+        Expect.equal
+          r.Cooldown
+          (1f / (def.FireRate * 1.1f))
+          "cooldown uses the upgraded fire rate"
+      | ValueNone -> failtest "runtime must exist")
 
     testCase "Upgrade bumps the level; EffectiveDef composes scaled stats" (fun () ->
       let m = model()

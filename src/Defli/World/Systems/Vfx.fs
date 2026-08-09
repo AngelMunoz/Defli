@@ -20,6 +20,7 @@ open Defli.World
 //
 // Kinds use the kenney_particle_pack assets (added for Phase 2):
 //   Impact   → spark_01  (projectile hits)
+//   Explosion→ flame_01  (cannon splash detonation)
 //   DeathPoof→ smoke_01  (enemy killed)
 //   Muzzle   → muzzle_01 (tower firing)
 //   Placement→ dirt_01   (tower placement dust)
@@ -36,6 +37,7 @@ open Defli.World
 [<Struct>]
 type VfxKind =
   | Impact
+  | Explosion
   | DeathPoof
   | Muzzle
   | Placement
@@ -50,6 +52,7 @@ type VfxPool(capacity: int) =
 
 type VfxModel() =
   member val Impact = VfxPool 256 with get, set
+  member val Explosion = VfxPool 256 with get, set
   member val DeathPoof = VfxPool 256 with get, set
   member val Muzzle = VfxPool 128 with get, set
   member val Placement = VfxPool 128 with get, set
@@ -68,6 +71,7 @@ module Vfx =
   let inline private paramsOf(kind: VfxKind) =
     match kind with
     | Impact -> struct (8, 140f, 12f, 150f)
+    | Explosion -> struct (14, 190f, 26f, 170f)
     | DeathPoof -> struct (6, 50f, 24f, 60f)
     | Muzzle -> struct (4, 80f, 16f, 220f)
     | Placement -> struct (6, 60f, 18f, 140f)
@@ -83,6 +87,7 @@ module Vfx =
       let pool =
         match kind with
         | Impact -> model.Impact
+        | Explosion -> model.Explosion
         | DeathPoof -> model.DeathPoof
         | Muzzle -> model.Muzzle
         | Placement -> model.Placement
@@ -138,11 +143,13 @@ module Vfx =
   /// Velocities are compacted in parallel with the particles.
   let tick (dt: float32) (model: VfxModel) : unit =
     let struct (_, _, _, fadeImpact) = paramsOf VfxKind.Impact
+    let struct (_, _, _, fadeExplosion) = paramsOf VfxKind.Explosion
     let struct (_, _, _, fadeDeath) = paramsOf VfxKind.DeathPoof
     let struct (_, _, _, fadeMuzzle) = paramsOf VfxKind.Muzzle
     let struct (_, _, _, fadePlacement) = paramsOf VfxKind.Placement
     let struct (_, _, _, fadeBaseHit) = paramsOf VfxKind.BaseHit
     stepPool dt model.Impact fadeImpact
+    stepPool dt model.Explosion fadeExplosion
     stepPool dt model.DeathPoof fadeDeath
     stepPool dt model.Muzzle fadeMuzzle
     stepPool dt model.Placement fadePlacement
@@ -151,6 +158,9 @@ module Vfx =
   // ── View (one .particles draw call per kind/texture) ──
   [<Literal>]
   let ImpactPath = "kenney_particle_pack/spark_01.png"
+
+  [<Literal>]
+  let ExplosionPath = "kenney_particle_pack/flame_01.png"
 
   [<Literal>]
   let DeathPoofPath = "kenney_particle_pack/smoke_01.png"
@@ -168,6 +178,7 @@ module Vfx =
   let inline private textureOf(kind: VfxKind) =
     match kind with
     | Impact -> ImpactPath
+    | Explosion -> ExplosionPath
     | DeathPoof -> DeathPoofPath
     | Muzzle -> MuzzlePath
     | Placement -> PlacementPath
@@ -215,6 +226,7 @@ module Vfx =
   let view (ctx: GameContext) (model: VfxModel) (buffer: RenderBuffer2D) =
     let assets = GameContext.getService<IAssets> ctx
     drawPool VfxKind.Impact model.Impact model assets buffer
+    drawPool VfxKind.Explosion model.Explosion model assets buffer
     drawPool VfxKind.DeathPoof model.DeathPoof model assets buffer
     drawPool VfxKind.Muzzle model.Muzzle model assets buffer
     drawPool VfxKind.Placement model.Placement model assets buffer

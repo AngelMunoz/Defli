@@ -108,7 +108,10 @@ dotnet fsi tools/analyze-subtree.fsx trace.speedscope.json
 The analyzer file is `tools/analyze-trace.fsx`. It reproduces all tables in
 this document from a new capture. `tools/analyze-subtree.fsx` adds the
 microscope pass: per-depth inclusive tables and per-frame subtree
-attribution (same sample-based census semantics).
+attribution (same sample-based census semantics). `tools/probe-sinks.fsx`
+adds the write-path census: per-30 s buckets of `pushMapDelta`/tick/
+OnDeltas samples (growth check) and per-frame open tallies for the
+changeable-map write path.
 
 ## 9. Phase-3 Follow-up (start → wave ~11, 2026-08-07)
 
@@ -275,3 +278,206 @@ per-tick `tryFind` node construction. 61.5 % of busy is the highest
 share recorded — this time the ratio is honest, not a mix artifact.
 Still far from the frame budget (6.7 % of 16.7 ms), but the growth
 rate is exactly the linear curve §1 predicted.
+
+## 12. 2026-08-09 Trace A — per-key scalar escapes (#16)
+
+The AdaptiveSlop submodule advanced to `2290cef` (feat: per-key/
+per-position precise scalar escapes, #16): `AMap.tryFind`/`count` and
+friends are no longer `AdaptiveNode` over whole-collection `GetValue`
+reads — they are delta-sink nodes that scan each delta for the watched
+key and advance their own version only when the watched output actually
+moved. The game code did not change (`AMap.tryFind`/`AMap.count` calls
+are identical). Same method, same census. A 368.7 s capture of the
+Phase-5 build (waves 10 → game over, ~wave 2X),
+collected after a warm-up run.
+
+| Fact | §11 capture (waves 11→21) | Trace A (waves 10→end) |
+| --- | --- | --- |
+| Game CPU busy time | 6.7 % of wall (1.11 ms/frame) | 17.1 % of wall (2.86 ms/frame) |
+| AdaptiveSlop busy share | 61.5 % of busy | 71.5 % of busy |
+| AdaptiveSlop wall share | 4.1 % (0.68 ms/frame) | 12.2 % (2.04 ms/frame) |
+| Towers.tick | 30.9 % of busy (0.34 ms/frame) | 47.2 % of busy (1.35 ms/frame) |
+| `Collections.pushMapDelta` (write dispatch) | — (absent from top frames) | 61.4 % of busy (10.5 % wall) — #1 |
+| `MapLookupNode<TowerRuntime>.OnDeltas` | — (new node type) | 42.6 % of busy |
+| `MapLookupNode<Motion>.OnDeltas` | — (new node type) | 18.1 % of busy |
+| Alive-count chain (RoomTick pull) | 11.5 % of busy | ~5.1 % (MapCountNode 2.7 % incl. its filter pull) |
+| Homing join (Projectiles) | 18.6 % of busy | 2.7 % of busy |
+| zeroCreate/Create samples | ~3 393 (10.6/s) | 1 052 (2.9/s) |
+| Node constructors on the tick path | 854 samples | none sampled |
+
+### 12.1 What the per-key differentiation fixed
+
+- **The allocation drip (§11's watch item) is 3.6× lower** (10.6 → 2.9
+  sampled array allocs/s) even in a busier session. The remaining
+  `zeroCreate` leaves are the genuinely-changed `AdaptiveNode.Recompute`
+  calls (cooldownA, the mapA join transforms), not the per-frame
+  `tryFind` node construction — the 854 constructor samples are gone.
+- **The Alive-count pull is ~2.3× cheaper.** `MapCountNode` now bumps
+  only when the count itself changes (an in-place HP write does not),
+  instead of re-running the whole `Alive` filter chain per write.
+  Lever #1 from §5 is now effectively applied library-side.
+- **The Homing join dropped 7×** (18.6 → 2.7 % of busy): its per-
+  projectile `tryFind`s are O(1) cached lookups instead of whole-map
+  re-reads with re-allocation.
+
+### 12.2 What regressed — the write-side fan-out
+
+The cost moved from read-time to write-time, and in this game's usage
+pattern that is a 3× net regression:
+
+- `pushMapDelta` is now the #1 consumer at 61.4 % of busy — it did not
+  exist in any previous top frame. Every `AddOrUpdate`/`Remove`
+  dispatches the delta to **every registered sink** of that map.
+- Towers.tick went 0.34 → 1.35 ms/frame; 42.6 % of busy is
+  `MapLookupNode<TowerRuntime>.OnDeltas` + its
+  `FSharpValueOption<TowerRuntime>.Equals` equality gate. The
+  per-tower-per-frame `AMap.tryFind` churn (Towers.fs:125, inside the
+  per-tower loop) registers a fresh node per tower per frame; the
+  per-tower `CMap.addOrUpdate` (Towers.fs:168/176/185, one per tower
+  per frame) then dispatches to all of them.
+- The Motion map repeats the shape: Enemies.fs:277-285 writes Motion
+  for every enemy every frame, while the `buildViews` mapA transform
+  re-runs per enemy per frame (positions change every frame) and
+  creates fresh `tryFind` nodes → 18.1 % of busy in the Motion
+  dispatch + equality gate.
+- The `GetValue`/`Register`/`AddMapSink` read side is nearly free now
+  (98 samples) — the lookup reads are O(1). The cost is purely the
+  per-(write × sink) dispatch.
+
+The library's promise ("a write to an unrelated key costs this node
+and its consumers nothing") is true **per node**: one lookup node is
+O(1) per unrelated write. The aggregate is O(writes × live sinks),
+and the game's per-frame node churn multiplies the live-sink count by
+the GC interval (weak refs die only when the GC actually collects;
+compaction happens at the next delivery/registration). Observed
+delivery fan-out is on the order of 10–40× the entity count (derived
+from 1.22 ms/frame of TowerRuntime dispatch at ~100 ns/delivery).
+
+### 12.3 The session is honest, not a mix artifact
+
+This time the ratio means what it says: the game is 2.5× busier than
+Phase 5 (end-game waves, larger alive set) and AdaptiveSlop still grew
+its share (61.5 → 71.5 %). The per-30 s buckets (`tools/probe-sinks.fsx`)
+show `pushMapDelta` at 59–68 % of every bucket from the first (wave 10,
+mid-game load comparable to Phase 5) — the dispatch dominates even at
+moderate load, and it stays flat (no super-linear growth within the
+session): the cost scales with the write volume, with a much larger
+constant than before.
+
+### 12.4 Verdict and next steps
+
+Not dead in the water — 2.04 ms/frame of adaptive work is still 8×
+under the frame budget — but the per-key refactor moved the cost to a
+place this game pays heavily: **the per-frame `tryFind` node churn**.
+The library's design intent is "register once, read many"; the game
+registers per entity per frame. Two game-side fixes, in impact order:
+
+1. **Stop the churn (the big one).** Hoist `AMap.tryFind` out of the
+   per-frame loops: one cached lookup node per tower id (built at
+   Place, stored on the model) and per enemy id inside `buildViews`
+   (memoized per eid). This removes the GC-interval multiplier from
+   the sink lists — the fan-out drops to O(writes × live entities).
+2. **Batch the per-tower Runtimes writes** into one `Transaction.run`
+   per frame (one delta instead of T per frame) — removes the
+   per-write delivery loop overhead (the Enemies movement writes are
+   already per-enemy `addOrUpdate`; a single transaction would batch
+   those too).
+
+If the churn cannot go away, the library-side lever that matches the
+commit's intent is a **key-indexed sink dispatch**: a per-key sink
+list so a delta dispatches only to sinks watching keys present in the
+delta — then per-frame dispatch is O(writes × sinks-per-key) instead
+of O(writes × all-sinks).
+
+Trend across all captures (absolute, the metric that matters):
+
+| Capture | Busy (% wall) | Adaptive busy-share | Adaptive wall | Adaptive ms/frame |
+| --- | --- | --- | --- | --- |
+| Phase 1 | 0.75 % | 64.9 % | 0.49 % | 0.08 |
+| Wave 28 (flattened) | 6.1 % | 5.3 % | 0.30 % | 0.05 |
+| Start→11 | 0.8 % | 46.9 % | 0.40 % | 0.07 |
+| Phase 3 | 0.9 % | 53.6 % | 0.50 % | 0.08 |
+| Phase 4 | 1.3 % | 49.5 % | 0.62 % | 0.10 |
+| Phase 5 | 6.7 % | 61.5 % | 4.1 % | 0.68 |
+| Trace A (#16 delivery) | 17.1 % | 71.5 % | 12.2 % | 2.04 |
+
+The curve is steeper than §1's linear prediction: the per-frame node
+churn × write fan-out is a quadratic-in-entities term that the old
+read-side design did not have. The allocation drip is fixed; the
+dispatch fan-out is the new watch item — and unlike the drip, it is
+CPU time, not garbage.
+
+## 13. 2026-08-09 Trace B — lazy scalar escapes (PR #17)
+
+The submodule advanced to `9bc0d9a` (feat: lazy scalar escapes —
+version-bump writes, read-time gate): the scalar escapes no longer
+register as delta sinks; a write is a version bump (O(1)) and the
+per-key gate runs at the node's next read. Same method, same census.
+A 208.9 s capture of the Phase-5 build, waves 11 → 16 (the player lost
+earlier this run), game code unchanged.
+
+| Fact | Trace A (delivery) | Trace B (lazy) |
+| --- | --- | --- |
+| Game CPU busy time | 17.1 % of wall (2.86 ms/frame) | 2.0 % of wall (0.33 ms/frame) |
+| AdaptiveSlop busy share | 71.5 % of busy | 42.4 % of busy |
+| AdaptiveSlop wall share | 12.2 % (2.04 ms/frame) | 0.84 % (0.14 ms/frame) |
+| `pushMapDelta` / lookup OnDeltas | 61.4 % of busy | 0 (MapLookupNode total 0.5 %) |
+| Towers.tick | 47.2 % of busy (1.35 ms/frame) | 12.3 % (0.04 ms/frame) |
+| Enemies.tick | 18.8 % of busy | 3.9 % |
+| Renderer2D | 4.0 % of busy | 27.7 % (mix effect in reverse) |
+| zeroCreate samples | 1 052 (0.048 ms/frame) | 343 (0.027 ms/frame) |
+
+Microscope (per-frame subtree attribution):
+
+- **The write-side dispatch is gone.** `pushMapDelta` and
+  `MapLookupNode.OnDeltas` do not appear in the profile at all
+  (MapLookupNode totals 0.5 % — a few `Resync` reads). Towers.tick's
+  children are now the real sim: target acquisition (7.2 %), cooldownA
+  `GetValue` (1.7 %), target `GetValue` (1.2 %) — no AddOrUpdate
+  machinery under it.
+- The remaining adaptive cost is the READ side, now the expected
+  pre-#16 shape with O(1) per-key reads: Views join drain
+  (`ElementMapNode<Vector2, EnemyView>` 13.3 %), Homing join drain
+  (15.8 %), the AliveCount chain pull (`MapCountNode.Resync` 13.1 % →
+  `FilterMapNode` 13.4 % → the Views drain — RoomTick reads it every
+  frame), and the genuinely-changed `AdaptiveNode.Recompute`s (~12 %,
+  cooldownA/targetA/EnemyView/HomingView — the §4 drip, now gated).
+- Allocation samples all sit on those changed recomputes — 343 over
+  the session, 0.027 ms/frame.
+
+Reading:
+
+- The §12 prediction materialized exactly: removing the eager delivery
+  collapsed the game's CPU 8.6× (2.86 → 0.33 ms/frame) and the
+  adaptive wall share 14.6× (12.2 % → 0.84 %). The absolute adaptive
+  cost (0.14 ms/frame) is back in the Phase 1–4 regime (0.08–0.10)
+  while the entity counts are Phase 5+.
+- Session caveat: waves 11–16 (mid-game) vs Trace A's end-game run —
+  part of the drop is load. The structural evidence is load-
+  independent: the dispatch frames do not exist in this profile, and
+  Towers.tick's children are sim work, not delivery.
+- The busy-share is now a mix artifact in the GOOD direction:
+  rendering is 27.7 % of busy because the adaptive tax collapsed —
+  absolute rendering roughly halved (1 155 vs 2 540 samples).
+
+### 13.1 The trend across all eight captures
+
+| Capture | Busy (% wall) | Adaptive busy-share | Adaptive wall | Adaptive ms/frame |
+| --- | --- | --- | --- | --- |
+| Phase 1 | 0.75 % | 64.9 % | 0.49 % | 0.08 |
+| Wave 28 (flattened) | 6.1 % | 5.3 % | 0.30 % | 0.05 |
+| Start→11 | 0.8 % | 46.9 % | 0.40 % | 0.07 |
+| Phase 3 | 0.9 % | 53.6 % | 0.50 % | 0.08 |
+| Phase 4 | 1.3 % | 49.5 % | 0.62 % | 0.10 |
+| Phase 5 | 6.7 % | 61.5 % | 4.1 % | 0.68 |
+| Trace A (#16 delivery) | 17.1 % | 71.5 % | 12.2 % | 2.04 |
+| Trace B (lazy, PR #17) | 2.0 % | 42.4 % | 0.84 % | 0.14 |
+
+The curve is back on the linear, sub-0.2 ms regime. The game's CPU is
+~42 % adaptive read-side, ~28 % rendering, ~16 % sim, ~8 % input,
+rest noise — 50× under the frame budget at waves 11–16. The write
+fan-out regression is closed; the remaining adaptive cost is the
+inherent per-frame read-side chain (positions change every frame →
+the joins re-run), which is the library's documented behavior and
+cheap enough that the §5 transient-count lever is no longer worth
+pulling.

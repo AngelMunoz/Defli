@@ -58,6 +58,9 @@ let private cellCenter(struct (x, y)) =
     float32 y * cellSize.Y + cellSize.Y / 2f
   )
 
+/// No boss aura in scope — an empty suppression map (factor 1 = free).
+let private noSuppression = Dictionary<int<TowerId>, float32>()
+
 let tests =
   testList "Towers" [
     testCase "place writes Statics + Runtimes + CellIndex atomically" (fun () ->
@@ -85,7 +88,7 @@ let tests =
 
       // Range 2 cells ≈ 128 px; enemy is far away.
       let alive = AMap.constant(fun () -> enemyAt (Vector2(900f, 900f)) 0.5f)
-      let struct (m2, events) = Towers.tick 0.1f m' alive cellSize
+      let struct (m2, events) = Towers.tick 0.1f m' alive noSuppression cellSize
       Expect.isEmpty events "no fire"
       Expect.equal (Seq.length events) 0 "no events"
 
@@ -103,7 +106,7 @@ let tests =
       let alive =
         AMap.constant(fun () -> enemyAt (cellCenter struct (4, 3)) 0.5f)
 
-      let struct (m2, events) = Towers.tick 0.1f m' alive cellSize
+      let struct (m2, events) = Towers.tick 0.1f m' alive noSuppression cellSize
 
       match events |> Seq.toArray with
       | [| Fired shot |] ->
@@ -147,7 +150,7 @@ let tests =
 
       let alive = AMap.constant(fun () -> alive)
 
-      let struct (_, events) = Towers.tick 0.1f m' alive cellSize
+      let struct (_, events) = Towers.tick 0.1f m' alive noSuppression cellSize
 
       match events |> Seq.toArray with
       | [| Fired shot |] ->
@@ -189,7 +192,7 @@ let tests =
         Towers.update (TowerMsg.Place(struct (3, 3), defWith policy)) m
 
       let struct (_, events) =
-        Towers.tick 0.1f m' (AMap.constant(fun () -> twoInRange)) cellSize
+        Towers.tick 0.1f m' (AMap.constant(fun () -> twoInRange)) noSuppression cellSize
 
       match events |> Seq.toArray with
       | [| Fired shot |] -> shot.Enemy
@@ -231,7 +234,7 @@ let tests =
         Towers.update (TowerMsg.Place(struct (3, 3), defWith TargetPolicy.Closest)) m
 
       let struct (_, events) =
-        Towers.tick 0.1f m' (AMap.constant(fun () -> alive)) cellSize
+        Towers.tick 0.1f m' (AMap.constant(fun () -> alive)) noSuppression cellSize
 
       match events |> Seq.toArray with
       | [| Fired shot |] -> Expect.equal shot.Enemy (1<EnemyId>) "closest"
@@ -247,7 +250,7 @@ let tests =
       let alive =
         AMap.constant(fun () -> enemyAt (cellCenter struct (4, 3)) 0.5f)
 
-      let struct (_, events) = Towers.tick 0.1f m' alive cellSize
+      let struct (_, events) = Towers.tick 0.1f m' alive noSuppression cellSize
 
       match events |> Seq.toArray with
       | [| Fired shot |] ->
@@ -265,7 +268,7 @@ let tests =
       let alive =
         AMap.constant(fun () -> enemyAt (cellCenter struct (4, 3)) 0.5f)
 
-      let struct (_, events) = Towers.tick 0.1f m' alive cellSize
+      let struct (_, events) = Towers.tick 0.1f m' alive noSuppression cellSize
 
       match events |> Seq.toArray with
       | [| Fired shot |] ->
@@ -288,7 +291,7 @@ let tests =
       let alive =
         AMap.constant(fun () -> enemyAt (cellCenter struct (4, 3)) 0.5f)
 
-      let struct (m3, events) = Towers.tick 0.1f m2 alive cellSize
+      let struct (m3, events) = Towers.tick 0.1f m2 alive noSuppression cellSize
       Expect.equal (Seq.length events) 1 "fired"
 
       match m3.Runtimes |> CMap.tryGetValue(0<TowerId>) with
@@ -297,6 +300,29 @@ let tests =
           r.Cooldown
           (1f / (def.FireRate * 1.1f))
           "cooldown uses the upgraded fire rate"
+      | ValueNone -> failtest "runtime must exist")
+
+    testCase "boss aura suppression halves the fire rate (double cooldown)" (fun () ->
+      let m = model()
+      let cell = struct (3, 3)
+
+      let struct (m', _) = Towers.update (TowerMsg.Place(cell, def)) m
+
+      let suppression = Dictionary<int<TowerId>, float32>()
+      suppression[0<TowerId>] <- BossAura.Factor
+
+      let alive =
+        AMap.constant(fun () -> enemyAt (cellCenter struct (4, 3)) 0.5f)
+
+      let struct (m2, events) = Towers.tick 0.1f m' alive suppression cellSize
+      Expect.equal (Seq.length events) 1 "fired"
+
+      match m2.Runtimes |> CMap.tryGetValue(0<TowerId>) with
+      | ValueSome r ->
+        Expect.equal
+          r.Cooldown
+          (1f / (def.FireRate * BossAura.Factor))
+          "suppressed cooldown"
       | ValueNone -> failtest "runtime must exist")
 
     testCase "Upgrade bumps the level; EffectiveDef composes scaled stats" (fun () ->
@@ -338,14 +364,14 @@ let tests =
         AMap.constant(fun () -> enemyAt (cellCenter struct (4, 3)) 0.5f)
 
       // Fire (cooldown = 0.25 at FireRate 4).
-      let struct (m2, events) = Towers.tick 0.1f m' alive cellSize
+      let struct (m2, events) = Towers.tick 0.1f m' alive noSuppression cellSize
       Expect.equal (Seq.length events) 1 "fired once"
 
       // 0.1 s later: still cooling down (0.25 - 0.1 = 0.15).
-      let struct (m3, events2) = Towers.tick 0.1f m2 alive cellSize
+      let struct (m3, events2) = Towers.tick 0.1f m2 alive noSuppression cellSize
       Expect.isEmpty events2 "not ready yet"
 
       // 0.2 s more: 0.15 - 0.2 ≤ 0 → fires again.
-      let struct (_, events3) = Towers.tick 0.2f m3 alive cellSize
+      let struct (_, events3) = Towers.tick 0.2f m3 alive noSuppression cellSize
       Expect.equal (Seq.length events3) 1 "fired again")
   ]

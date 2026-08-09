@@ -3,6 +3,7 @@ module Defli.Tests.RouterTests
 open Expecto
 open System.Collections.Generic
 open AdaptiveSlop.Core
+open Mibo.Elmish
 open Defli
 open Defli.World
 open Defli.World.Systems
@@ -20,6 +21,19 @@ let private cfg = TestData.Fixtures.cfg
 let private goldOf(m: WorldModel) = AVal.getValue m.Economy.Gold
 let private livesOf(m: WorldModel) = AVal.getValue m.Economy.Lives
 let private aliveOf(m: WorldModel) = AVal.getValue m.Enemies.AliveCount
+
+// ── Phase 6: boss-wave helpers ──
+
+/// Jump the director to a boss wave and start it.
+let private startBossWave(runner: HeadlessRunner<WorldModel, WorldMsg>) =
+  runner.Model.Waves.WaveNumber.Set 4 // next StartNextWave → wave 5
+  runner.Dispatch(WorldMsg.StartNextWave)
+
+let private bossIdOf(m: WorldModel) =
+  m.Enemies.Defs
+  |> AMap.getValue
+  |> Seq.tryPick(fun (KeyValueV(eid, d)) ->
+    if d.Archetype = EnemyArchetype.Boss then Some eid else None)
 
 let tests =
   testList "Router (e2e)" [
@@ -409,4 +423,89 @@ let tests =
         (cfg.StartingGold + 60 - TowerDefs.cannon.Cost
          + 2 * TestData.Fixtures.runner.GoldReward)
         "manual kill + splash kill both rewarded")
+
+    // ── Phase 6: boss waves through the router ──
+
+    testCase "boss wave: the boss spawns and suppresses a road-side tower" (fun () ->
+      let runner = TestData.mkRunner cfg
+
+      runner.Dispatch(WorldMsg.PlaceTower(struct (2, 3)))
+      runner.StepN(2, TestData.dt)
+
+      startBossWave runner
+
+      // The boss leads (1.5 s delay) — it must appear among the defs.
+      let bossUp =
+        runner.StepUntil((fun m -> (bossIdOf m).IsSome), TestData.dt, 60)
+
+      Expect.isTrue bossUp "boss spawned"
+
+      // The boss walks the road (row 4, y = 288); it enters the tower's
+      // aura radius (128 px of (160, 224)) after ~5 s. Tower dps is far
+      // too low to kill it first (arrow 22.5 dps vs 800 hp).
+      let suppressed =
+        runner.StepUntil(
+          (fun m ->
+            m.Projections.Suppression
+            |> AMap.getValue
+            |> ReadOnlyDict.tryGetValue(0<TowerId>)
+            |> ValueOption.exists(fun f -> f = BossAura.Factor)),
+          TestData.dt,
+          200
+        )
+
+      Expect.isTrue suppressed "tower suppressed while the boss is near")
+
+    testCase "boss killed → split children spawn, wave does NOT clear early" (fun () ->
+      let runner = TestData.mkRunner cfg
+
+      // No towers: nothing else kills the children; they will leak.
+      startBossWave runner
+
+      let bossUp =
+        runner.StepUntil((fun m -> (bossIdOf m).IsSome), TestData.dt, 60)
+
+      Expect.isTrue bossUp "boss spawned"
+
+      let bossId = (bossIdOf runner.Model).Value
+      let aliveBefore = aliveOf runner.Model
+
+      runner.Dispatch(
+        WorldMsg.EnemyMsg(Enemies.EnemyMsg.ApplyDamage(bossId, 99999))
+      )
+
+      runner.StepN(2, TestData.dt)
+
+      let model = runner.Model
+
+      // The split is synchronous: children exist the same dispatch.
+      // alive = before − 1 (boss) + SplitCount (children).
+      Expect.equal
+        (aliveOf model)
+        (aliveBefore - 1 + BossAura.SplitCount)
+        "split children spawned"
+
+      Expect.isTrue
+        (AVal.getValue model.Waves.WaveActive)
+        "the split frame must not clear the wave"
+
+      // The boss paid its reward (kill) — children pay theirs on death.
+      // Wave 5 is tier 1: the reward is scaled ×1.2.
+      Expect.equal
+        (goldOf model)
+        (cfg.StartingGold + int(float EnemyDefs.boss.GoldReward * 1.2))
+        "boss reward paid"
+
+      // The wave eventually clears (children + pack leak; lives 20 ≥
+      // wave-5 count 15 + 3 children + boss... boss was killed, so
+      // 15 + 3 = 18 leaks ≤ 20 lives).
+      let cleared =
+        runner.StepUntil(
+          (fun m -> not(AVal.getValue m.Waves.WaveActive)),
+          TestData.dt,
+          4000
+        )
+
+      Expect.isTrue cleared "wave cleared after children leaked"
+      Expect.isFalse (AVal.getValue model.Economy.GameOver) "survived")
   ]

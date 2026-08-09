@@ -1,5 +1,6 @@
 module Defli.Tests.ProjectionTests
 
+open System.Numerics
 open Expecto
 open AdaptiveSlop.Core
 open TestData
@@ -145,4 +146,74 @@ let tests =
         Economy.update EconomyMsg.LoseLife e
 
       Expect.isTrue (AVal.getValue e.GameOver) "over at zero")
+
+    testCase "Suppression: boss in radius suppresses, others don't" (fun () ->
+      let enemies = Enemies.init()
+      let towers = Towers.Towers.init()
+
+      // Tower at cell (2,3) — center (160, 224).
+      let struct (t', _) =
+        Towers.Towers.update
+          (Towers.TowerMsg.Place(struct (2, 3), TowerDefs.arrow))
+          towers
+
+      let projections =
+        Projections(
+          enemies,
+          t',
+          Projectiles.Projectiles.init(),
+          Economy.Economy.init cfg,
+          MapModel.buildableGrid map,
+          CVal.create ValueNone,
+          CVal.create TowerDefs.arrow
+        )
+
+      let factorOf(tid: int<TowerId>) =
+        // Lazy settle is bottom-up: read the chain's bottom
+        // (BossPositions) so the tail read settles in this read —
+        // the same contract RoomTick honors.
+        enemies.BossPositions |> AMap.getValue |> ignore
+
+        projections.Suppression
+        |> AMap.getValue
+        |> ReadOnlyDict.tryGetValue tid
+
+      // No boss in the world → free (factor 1).
+      Expect.equal (factorOf(0<TowerId>)) (ValueSome 1f) "free without boss"
+
+      // Boss ON the tower's cell → suppressed.
+      let struct (e2, _) =
+        Enemies.update
+          (EnemyMsg.SpawnAt(Fixtures.boss, Vector2(160f, 224f), 0f, 0))
+          enemies
+          map.Path
+
+      Expect.equal
+        (factorOf(0<TowerId>))
+        (ValueSome BossAura.Factor)
+        "suppressed in radius"
+
+      // A non-boss at the same spot does NOT suppress.
+      let struct (e3, _) =
+        Enemies.update (EnemyMsg.Despawn(0<EnemyId>)) e2 map.Path
+
+      let struct (e4, _) =
+        Enemies.update
+          (EnemyMsg.SpawnAt(Fixtures.grunt, Vector2(160f, 224f), 0f, 0))
+          e3
+          map.Path
+
+      Expect.equal (factorOf(0<TowerId>)) (ValueSome 1f) "grunts don't suppress"
+
+      // A boss OUTSIDE the radius (200 px away > Radius 128) doesn't either.
+      let struct (e5, _) =
+        Enemies.update (EnemyMsg.Despawn(1<EnemyId>)) e4 map.Path
+
+      let struct (_, _) =
+        Enemies.update
+          (EnemyMsg.SpawnAt(Fixtures.boss, Vector2(360f, 224f), 0f, 0))
+          e5
+          map.Path
+
+      Expect.equal (factorOf(0<TowerId>)) (ValueSome 1f) "out of radius")
   ]

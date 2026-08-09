@@ -100,12 +100,15 @@ module Towers =
       model, Array.empty
 
   /// Hot path: cooldown decay + target acquisition + fire.
-  /// `alive` is a transient read of Enemies.Alive (direct value from
-  /// the router); `cellSize` is the grid's uniform cell size.
+  /// `alive` is a transient read of Enemies.Alive and `suppression`
+  /// one of the world's boss-aura projection (both direct values from
+  /// the router — hot path, no closures); `cellSize` is the grid's
+  /// uniform cell size.
   let tick
     (dt: float32)
     (model: TowersModel)
     (alive: amap<int<EnemyId>, EnemyView>)
+    (suppression: IReadOnlyDictionary<int<TowerId>, float32>)
     (cellSize: Vector2)
     : struct (TowersModel * TowerEvent seq) =
     let mutable events: ResizeArray<TowerEvent> = null
@@ -119,6 +122,13 @@ module Towers =
         effective
         |> ReadOnlyDict.tryGetValue tid
         |> ValueOption.defaultValue s.Def
+
+      // Boss aura (Phase 6): a live boss near this tower multiplies
+      // its fire rate by the suppression factor (default 1 = free).
+      let suppress =
+        suppression
+        |> ReadOnlyDict.tryGetValue tid
+        |> ValueOption.defaultValue 1f
 
       let center = Cells.center s.Cell cellSize
       let rangeWorld = float32 def.Range * cellSize.X
@@ -175,10 +185,12 @@ module Towers =
           )
 
           // Cooldown from the EFFECTIVE def (Statics × Levels): the
-          // +10 %/level fire-rate upgrade must actually apply.
+          // +10 %/level fire-rate upgrade must actually apply. The
+          // boss-aura suppression factor multiplies the rate (0.5 =
+          // half speed → double cooldown).
           model.Runtimes
           |> CMap.addOrUpdate tid {
-            Cooldown = 1f / max 0.1f def.FireRate
+            Cooldown = 1f / max 0.1f (def.FireRate * suppress)
             Target = ValueSome eid
           }
         | ValueNone ->

@@ -1,5 +1,6 @@
 namespace Defli.World
 
+open System
 open System.Numerics
 open AdaptiveSlop.Core
 open Mibo
@@ -113,6 +114,41 @@ module World =
           Cmd.ofMsg(EconomyMsg(Economy.EarnGold reward))
           Cmd.ofMsg(EnemyMsg(Enemies.Despawn eid))
           Cmd.ofMsg(VfxMsg(Vfx.Burst(Vfx.VfxKind.DeathPoof, pos)))
+
+          // Boss split-on-death (Phase 6): grunts burst from the
+          // corpse. Spawned SYNCHRONOUSLY (the FillWave-on-WaveStarted
+          // precedent): a Cmd round-trip would leave one frame with
+          // aliveCount = 0 and the wave would clear before the
+          // children exist. Children carry the wave's tier scale.
+          let isBoss =
+            model.Enemies.Defs
+            |> CMap.tryGetValue eid
+            |> ValueOption.exists(fun d -> d.Archetype = EnemyArchetype.Boss)
+
+          if isBoss then
+            let struct (progress, pathIndex) =
+              model.Enemies.Motions
+              |> CMap.tryGetValue eid
+              |> ValueOption.map(fun mv -> struct (mv.Progress, mv.PathIndex))
+              |> ValueOption.defaultValue struct (0f, 0)
+
+            let scale = AVal.getValue model.Waves.Scale
+            let childDef = WaveScale.apply scale BossAura.SplitInto
+
+            for i in 0 .. BossAura.SplitCount - 1 do
+              // Small deterministic radial offsets so the children
+              // don't stack on one pixel.
+              let angle =
+                float32 i / float32 BossAura.SplitCount * 2f * MathF.PI
+
+              let childPos =
+                pos + Vector2(MathF.Cos angle, MathF.Sin angle) * 16f
+
+              Enemies.Enemies.update
+                (Enemies.SpawnAt(childDef, childPos, progress, pathIndex))
+                model.Enemies
+                model.Map.Path
+              |> ignore
         | Enemies.ReachedBase _ ->
           let basePos = Cells.center model.Map.BaseCell (cellSize model)
 
@@ -269,7 +305,22 @@ module World =
           (model.Spawning.Queue.Count = 0)
 
       let struct (_, towerEvents) =
-        Towers.Towers.tick dt model.Towers model.Enemies.Alive (cellSize model)
+        // LAZY SETTLE IS BOTTOM-UP (Phase 6 learning): a transform node
+        // (chooseA/filter) only pushes downstream when it is itself
+        // read, and MapCountNode gates on its DIRECT source's version —
+        // so reading the Suppression tail alone would serve the value
+        // from the last time the middle of the chain was read (here:
+        // never → permanently stale). Read BossPositions first: its
+        // rescan journals the per-tower filters, and the Suppression
+        // read then settles the whole chain in the same frame.
+        let _bossPositions = model.Enemies.BossPositions |> AMap.getValue
+
+        Towers.Towers.tick
+          dt
+          model.Towers
+          model.Enemies.Alive
+          (model.Projections.Suppression |> AMap.getValue)
+          (cellSize model)
 
       let struct (_, projectileEvents) =
         Projectiles.Projectiles.tick

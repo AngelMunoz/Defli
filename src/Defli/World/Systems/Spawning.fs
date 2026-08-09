@@ -61,8 +61,10 @@ module Spawning =
 
       result
 
-  /// Cold path: rebuild the queue from a wave — one weighted pick per
-  /// spawn, spaced by the wave's interval.
+  /// Cold path: rebuild the queue from a wave — explicit ExtraSpawns
+  /// at their fixed delays (the boss leads), then one weighted pick
+  /// per spawn, spaced by the wave's interval. Each entry carries its
+  /// own remaining delay, so queue order never affects timing.
   let update
     (msg: SpawnMsg)
     (model: SpawningModel)
@@ -71,6 +73,10 @@ module Spawning =
     | FillWave wave ->
       model.Queue.Clear()
       let queue = model.Queue
+
+      for struct (def, delay) in wave.ExtraSpawns do
+        queue.Add struct (def, delay)
+
       let mutable delay = wave.InitialDelay
       let mutable failed = false
 

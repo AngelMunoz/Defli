@@ -52,6 +52,31 @@ let tests =
       Expect.isTrue ((m'.Positions |> CMap.tryGetValue eid).IsSome) "position"
       Expect.isTrue ((m'.Defs |> CMap.tryGetValue eid).IsSome) "def")
 
+    testCase "SpawnAt writes rows at the given position and path state" (fun () ->
+      let m = model()
+      let pos = Vector2(100f, 200f)
+
+      let struct (m', _) =
+        Enemies.update
+          (EnemyMsg.SpawnAt(Fixtures.grunt, pos, 0.5f, 2))
+          m
+          map.Path
+
+      let eid = 0<EnemyId>
+
+      match m'.Positions |> CMap.tryGetValue eid with
+      | ValueSome p -> Expect.equal p pos "explicit position"
+      | ValueNone -> failtest "position must exist"
+
+      match m'.Motions |> CMap.tryGetValue eid with
+      | ValueSome mv ->
+        Expect.equal mv.Progress 0.5f "explicit progress"
+        Expect.equal mv.PathIndex 2 "explicit path index"
+      | ValueNone -> failtest "motion must exist"
+
+      // Healths/Defs written like a regular spawn; projections agree.
+      Expect.equal (aliveCount m') 1 "alive")
+
     testCase "damage reduces HP; death emits Killed with reward" (fun () ->
       let m = model()
 

@@ -30,6 +30,10 @@ open Defli.World
 [<Struct>]
 type EnemyMsg =
   | Spawn of def: EnemyDef
+  /// Spawn mid-path at an explicit position/progress (Phase 6 split
+  /// children appear at the corpse — Spawn would teleport them to the
+  /// path origin).
+  | SpawnAt of spawnAt: struct (EnemyDef * Vector2 * float32 * int)
   | ApplyDamage of applyDamage: struct (int<EnemyId> * int)
   | ApplySlow of slow: SlowApply
   | Despawn of enemy: int<EnemyId>
@@ -56,6 +60,11 @@ type EnemiesModel() =
     Unchecked.defaultof<_> with get, set
 
   member val AliveCount: aval<int> = Unchecked.defaultof<_> with get, set
+
+  /// Live boss positions (Positions × Defs, archetype-filtered) — the
+  /// world-owned Suppression projection joins on this (Phase 6).
+  member val BossPositions: amap<int<EnemyId>, Vector2> =
+    Unchecked.defaultof<_> with get, set
 
 module Enemies =
   open System
@@ -100,11 +109,30 @@ module Enemies =
   let private buildAliveCount(m: EnemiesModel) : aval<int> =
     m.Alive |> AMap.count
 
+  /// Boss positions: per-enemy tryFind into Defs (the Views-join
+  /// shape), kept only when the archetype is Boss. Written by the
+  /// movement tick like Positions; read by the world's Suppression
+  /// projection.
+  let private buildBossPositions(m: EnemiesModel) : amap<int<EnemyId>, Vector2> =
+    m.Positions
+    |> AMap.chooseA(fun eid pos ->
+      m.Defs
+      |> AMap.tryFind eid
+      |> AVal.map(fun def ->
+        def
+        |> ValueOption.bind(fun d ->
+          if d.Archetype = EnemyArchetype.Boss then
+            ValueSome pos
+          else
+            ValueNone)
+        |> ValueOption.toOption))
+
   let init() : EnemiesModel =
     let m = EnemiesModel()
     m.Views <- buildViews m
     m.Alive <- buildAlive m
     m.AliveCount <- buildAliveCount m
+    m.BossPositions <- buildBossPositions m
     m
 
   // ── Cold path (router messages) — mutates OWN maps only ──
@@ -131,6 +159,27 @@ module Enemies =
         }
 
         model.Positions |> CMap.addOrUpdate eid path[0]
+        model.Defs |> CMap.addOrUpdate eid def)
+
+      model, Array.empty
+    | SpawnAt(def, pos, progress, pathIndex) ->
+      // Split-child spawn: the same atomic four-row write, but at the
+      // corpse's position and path state (not the path origin).
+      let eid = model.NextId
+      model.NextId <- model.NextId + 1<EnemyId>
+
+      Transaction.run(fun () ->
+        model.Healths |> CMap.addOrUpdate eid { Hp = def.Hp; MaxHp = def.Hp }
+
+        model.Motions
+        |> CMap.addOrUpdate eid {
+          Speed = def.Speed
+          Slow = 1f
+          Progress = progress
+          PathIndex = pathIndex
+        }
+
+        model.Positions |> CMap.addOrUpdate eid pos
         model.Defs |> CMap.addOrUpdate eid def)
 
       model, Array.empty
@@ -228,7 +277,7 @@ module Enemies =
           idx <- 0
           arrived <- progress >= 1f
         else
-          // Waypoint walking (Grunt/Runner/Tank).
+          // Waypoint walking (Grunt/Runner/Tank/Boss).
           let mutable remaining = mv.Speed * mv.Slow * dt
 
           while remaining > 0f && not arrived do
@@ -311,6 +360,20 @@ module Enemies =
       defs
       |> ReadOnlyDict.tryGetValue eid
       |> ValueOption.iter(fun def ->
+        let isBoss = def.Archetype = EnemyArchetype.Boss
+
+        // Boss aura ring (Phase 6): the suppression radius, drawn
+        // faintly under everything else the boss overlaps.
+        if isBoss then
+          buffer
+            .circleOutline(
+              v.Pos,
+              BossAura.Radius,
+              Mibo.Color.create 255uy 60uy 60uy 70uy,
+              layer = Layers.Effects
+            )
+            .drop()
+
         // Heading: fliers fly the straight spawn → base line; the rest
         // aim at the next waypoint (0° = up; raylib rotates CW).
         let angle =
@@ -323,11 +386,14 @@ module Enemies =
             let d = path[v.PathIndex + 1] - v.Pos
             (MathF.Atan2(d.Y, d.X) * 180f / MathF.PI) % 360f
 
+        // Bosses render 1.6× — the silhouette must read at a glance.
+        let sizeBoost = if isBoss then 1.6f else 1f
+
         def.Sprite
         |> Tiles.tryByName
         |> ValueOption.iter(fun tile ->
           // Scale the baked sprite to a consistent ~44px while keeping aspect.
-          let scale = 44f / max (float32 tile.Width) (float32 tile.Height)
+          let scale = 44f * sizeBoost / max (float32 tile.Width) (float32 tile.Height)
           let w = float32 tile.Width * scale
           let h = float32 tile.Height * scale
 
@@ -350,7 +416,7 @@ module Enemies =
         |> ValueOption.bind Tiles.tryByName
         |> ValueOption.iter(fun turretTile ->
           let tscale =
-            44f / max (float32 turretTile.Width) (float32 turretTile.Height)
+            44f * sizeBoost / max (float32 turretTile.Width) (float32 turretTile.Height)
 
           let tw = float32 turretTile.Width * tscale
           let th = float32 turretTile.Height * tscale

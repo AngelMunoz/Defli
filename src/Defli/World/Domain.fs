@@ -125,6 +125,9 @@ type EnemyArchetype =
   | Runner
   | Tank
   | Flier
+  /// Slow, huge HP, debuffs nearby towers (BossAura), splits on death.
+  /// Walks the road — no custom locomotion.
+  | Boss
 
 [<Struct>]
 type EnemyDef = {
@@ -191,7 +194,39 @@ module EnemyDefs =
     TurretAngle = 0f
   }
 
-  let all = [| grunt; runner; tank; flier |]
+  /// Boss — every 5th wave's leader (Phase 6). Slow, deep HP pool,
+  /// suppresses nearby towers (BossAura), splits into grunts on death.
+  /// Inverse-of-tank palette, rendered 1.6× (Enemies.view).
+  let boss = {
+    Key = "boss"
+    Archetype = EnemyArchetype.Boss
+    Hp = 500
+    Speed = 25f
+    GoldReward = 50
+    Sprite = "tank_hull_beige"
+    Turret = ValueSome "tank_turret_green"
+    TurretAngle = 0f
+  }
+
+  let all = [| grunt; runner; tank; flier; boss |]
+
+/// Boss aura + split parameters (Phase 6) — constants keyed off the
+/// Boss ARCHETYPE, not EnemyDef fields: a per-def field would ripple
+/// through every def literal and fixture for one archetype's sake.
+module BossAura =
+
+  /// Towers within this distance (world px — 2 tiles) of a live boss
+  /// have their fire rate multiplied by Factor.
+  let Radius = 128f
+
+  /// Fire-rate multiplier for suppressed towers (0.5 = halved).
+  let Factor = 0.5f
+
+  /// Grunts spawned at the corpse when a boss dies.
+  let SplitCount = 3
+
+  /// The child def (the wave's tier scale is applied by the router).
+  let SplitInto = EnemyDefs.grunt
 
 /// Per-enemy components (rows in the Enemies sub-system's CMaps).
 [<Struct>]
@@ -213,6 +248,10 @@ type WaveDef = {
   Count: int
   Interval: float32
   InitialDelay: float32
+  /// Explicit spawns at fixed delays, queued AHEAD of the weighted
+  /// picks (Phase 6: the boss leads its wave deterministically — a
+  /// table entry would make it a dice roll). Empty for regular waves.
+  ExtraSpawns: struct (EnemyDef * float32)[]
 }
 
 /// Join row of the EnemyViews projection (Positions × Healths × Motions).

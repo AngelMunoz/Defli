@@ -12,6 +12,7 @@ let private gruntWave = {
   Count = 4
   Interval = 0.5f
   InitialDelay = 1.0f
+  ExtraSpawns = Array.empty
 }
 
 /// A mixed wave — exercises the weighted pick.
@@ -24,6 +25,7 @@ let private mixedWave = {
   Count = 30
   Interval = 0.25f
   InitialDelay = 0.5f
+  ExtraSpawns = Array.empty
 }
 
 let tests =
@@ -97,6 +99,7 @@ let tests =
             Count = 3
             Interval = 0.5f
             InitialDelay = 0f
+            ExtraSpawns = Array.empty
           })
           m
 
@@ -105,4 +108,24 @@ let tests =
       | _ -> failtest "expected SpawnFailed"
 
       Expect.equal m'.Queue.Count 0 "empty queue")
+
+    testCase "ExtraSpawns queue ahead of the weighted picks at fixed delays" (fun () ->
+      let m = Spawning.init 42
+
+      let struct (m', events) =
+        Spawning.update
+          (SpawnMsg.FillWave {
+            gruntWave with
+                ExtraSpawns = [| struct (Fixtures.tank, 0.25f) |]
+          })
+          m
+
+      Expect.equal events.Length 0 "no failures"
+
+      // The extra spawn is queued in ADDITION to the Count picks.
+      Expect.equal m'.Queue.Count (gruntWave.Count + 1) "extra queued"
+
+      let struct (def0, delay0) = m'.Queue[0]
+      Expect.equal def0 Fixtures.tank "extra leads"
+      Expect.equal delay0 0.25f "fixed delay")
   ]

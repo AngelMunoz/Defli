@@ -54,9 +54,10 @@ module Waves =
   /// Deterministic composition per wave number — no RNG here; the
   /// weighted table is executed (picked) by Spawning. Escalation:
   /// tanks from wave 3, fliers from wave 4, boss waves (every 5th)
-  /// mix all four archetypes. The difficulty scale (WaveScale — every
-  /// 5 waves) is applied to the table's defs HERE, so the spawned
-  /// defs carry the tier's stats.
+  /// mix all four archetypes AND lead with a boss (ExtraSpawns — a
+  /// table entry would make the boss a dice roll). The difficulty
+  /// scale (WaveScale — every 5 waves) is applied to the defs HERE,
+  /// so the spawned defs carry the tier's stats.
   let composeWave(number: int) : WaveDef =
     let count = 5 + number * 2
     let interval = max 0.3f (1.2f - float32 number * 0.05f)
@@ -89,11 +90,20 @@ module Waves =
       else
         scaleTable [| struct (EnemyDefs.grunt, 4); struct (EnemyDefs.runner, 2) |]
 
+    // Boss waves: the boss leads the pack (spawns with the initial
+    // delay, ahead of the weighted picks), tier-scaled like the rest.
+    let extraSpawns =
+      if number % 5 = 0 then
+        [| struct (WaveScale.apply scale EnemyDefs.boss, 1.5f) |]
+      else
+        Array.empty
+
     {
       Table = table
       Count = count
       Interval = interval
       InitialDelay = 1.5f
+      ExtraSpawns = extraSpawns
     }
 
   /// Cold path: start the next wave (no-op while one is active or the

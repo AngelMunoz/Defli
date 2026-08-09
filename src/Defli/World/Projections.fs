@@ -13,6 +13,9 @@ open Defli.World.Systems
 //   Homing (#3)          — Projectiles.Rows × Enemies.Positions
 //                          (the bind showcase: per-projectile
 //                          dynamic dependency on the target's row)
+//   Suppression (#12)    — Towers.Statics × Enemies.BossPositions
+//                          (the SPATIAL join: per-tower filter over
+//                          boss positions — Phase 6 boss aura)
 //   RangeRing (#10)      — hover cell × Towers.CellIndex/Statics
 //                          (AVal.bind UI-state join)
 //   PlacementPreview (#5)— hover cell × Towers.CellIndex ×
@@ -51,6 +54,27 @@ type Projections
           TargetPos = pos |> ValueOption.defaultValue row.LastTargetPos
           Sprite = row.ProjectileSprite
         }))
+
+  /// #12 Suppression (Phase 6) — per tower, is a live boss within
+  /// BossAura.Radius of its cell? → the fire-rate factor (1 = free,
+  /// Factor = suppressed). The SPATIAL-join stress case: boss
+  /// positions change every frame, so every tower's filter/count node
+  /// re-scans the boss map per frame — O(towers × bosses) of graph
+  /// work per frame. Consumed as a DIRECT VALUE by Towers.tick (the
+  /// router passes the transient view; nothing is written back into
+  /// a changeable map).
+  member val Suppression: amap<int<TowerId>, float32> =
+    let cellSize = Vector2(float32 Tiles.TileSize, float32 Tiles.TileSize)
+
+    towers.Statics
+    |> AMap.mapA(fun _ s ->
+      let center = Cells.center s.Cell cellSize
+
+      enemies.BossPositions
+      |> AMap.filter(fun _ bossPos ->
+        Vector2.Distance(bossPos, center) <= BossAura.Radius)
+      |> AMap.count
+      |> AVal.map(fun n -> if n > 0 then BossAura.Factor else 1f))
 
   /// #10 RangeRing — hovered own tower → its EFFECTIVE def (the view
   /// draws the range circle). The chain composes derived-on-derived:

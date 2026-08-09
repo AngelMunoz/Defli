@@ -795,6 +795,32 @@ no new adaptive machinery needed.
 - Optional: save/load (wave progress + high score — Kimo Phase 9 analog),
   audio. **Deferred to later phases** (post-Phase 5).
 
+### Phase 6 — Boss waves (the spatial-join stress case)
+- `Boss` archetype: slow, deep HP pool, walks the road (no custom
+  locomotion). Every 5th wave leads with a tier-scaled boss via
+  `WaveDef.ExtraSpawns` (explicit fixed-delay spawns queued ahead of the
+  weighted picks — a table entry would make the boss a dice roll).
+- **Suppression aura (the experiment)**: world-owned projection
+  `Suppression = Towers.Statics × Enemies.BossPositions` — per-tower
+  filter over live boss positions within `BossAura.Radius`, count > 0 →
+  fire-rate factor. Boss positions move every frame → T filter/count
+  nodes re-scan per frame: O(towers × bosses) of graph work for what a
+  raw loop does free. Consumed MVU-clean: the router passes the
+  transient view into `Towers.tick` as a direct value (like `Alive`);
+  nothing is written back into a changeable map.
+- **Split-on-death**: `Killed` (boss) → router synchronously spawns
+  `SplitCount` grunts at the corpse (`EnemyMsg.SpawnAt` — same atomic
+  four-row write at an explicit position/progress; `Spawn` would
+  teleport children to the path origin). Synchronous per the
+  FillWave-on-WaveStarted precedent: a Cmd round-trip would let the
+  wave clear in the one-frame window before children exist.
+- **The settle-ordering caveat (rule 12)** — the phase's real finding:
+  reading only the Suppression tail served a permanently stale value
+  until the chain's bottom (`BossPositions`) was read. RoomTick now
+  reads bottom-up. Traces to be captured post-landing.
+- Deferred from this phase: boss HP-bar UI, aura affecting enemy
+  movement, save/load, audio, tower LOS.
+
 ## 11. AdaptiveSlop Performance Rules & Risks
 
 From the README/benchmarks + our own measurements — enforced, not aspirational:
@@ -837,6 +863,17 @@ From the README/benchmarks + our own measurements — enforced, not aspirational
     scan risk (unobserved nodes re-check entries on read) — keep them read once
     per frame, keep target counts bounded (projectiles, not enemies, for homing
     binds).
+12. **Lazy settle is bottom-up — read the chain's bottom first.** Transform
+    nodes (chooseA/filter) only push downstream when they are themselves
+    read, and scalar escapes (`count`/`tryFind`) gate on their DIRECT
+    source's version. Reading only the tail of a deep chain
+    (cmap → chooseA → filter → count → map) serves the value from the
+    last time the middle was read — if nothing reads the bottom, that is
+    *permanently stale* (Phase 6's Suppression bug: the aura never
+    flipped until RoomTick read `BossPositions` before the tail).
+    Per-frame loops that read every level every frame converge with ≤1
+    frame lag (why `AliveCount` never showed it); a chain read only at
+    its tail does not.
 
 ## 12. Testing Strategy
 

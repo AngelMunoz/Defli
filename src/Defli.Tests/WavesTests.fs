@@ -84,6 +84,30 @@ let tests =
       Expect.equal (tableOf 5) (tableOf 5) "wave 5 table stable"
       Expect.equal (tableOf 12) (tableOf 12) "wave 12 table stable")
 
+    testCase "boss waves (every 5th) lead with a tier-scaled boss" (fun () ->
+      let w5 = Waves.composeWave 5
+      Expect.hasLength w5.ExtraSpawns 1 "one extra spawn"
+
+      let struct (bossDef, delay) = w5.ExtraSpawns[0]
+      Expect.equal bossDef.Archetype EnemyArchetype.Boss "boss leads"
+      Expect.equal delay 1.5f "spawns with the initial delay"
+
+      // Wave 5 is tier 1: ×1.6 HP. Expected values mirror the impl's
+      // float32 math exactly (1.6² in float32 is 2.5599999).
+      let expectedHp n =
+        max 1 (int(float EnemyDefs.boss.Hp * float (WaveScale.ofWave n).Hp))
+
+      Expect.equal bossDef.Hp (expectedHp 5) "tier-scaled hp"
+
+      let w10 = Waves.composeWave 10
+      let struct (boss10, _) = w10.ExtraSpawns[0]
+
+      Expect.equal boss10.Hp (expectedHp 10) "wave 10 ×1.6²"
+
+      // Regular waves have no extras.
+      for n in [ 1; 2; 3; 4; 6; 7 ] do
+        Expect.isEmpty (Waves.composeWave n).ExtraSpawns $"wave %d{n} no extras")
+
     testCase "StartNextWave composes + activates, then refuses" (fun () ->
       let m = Waves.init()
       let struct (m', events) = Waves.update WaveMsg.StartNextWave m

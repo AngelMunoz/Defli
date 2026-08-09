@@ -72,7 +72,19 @@ module Fixtures =
     TurretAngle = 0f
   }
 
-  let all = [| grunt; runner; tank; flier |]
+  /// Test boss — distinct values catch production mix-ups.
+  let boss = {
+    Key = "test_boss"
+    Archetype = EnemyArchetype.Boss
+    Hp = 200
+    Speed = 30f
+    GoldReward = 20
+    Sprite = "tank_hull_beige"
+    Turret = ValueSome "tank_turret_green"
+    TurretAngle = 0f
+  }
+
+  let all = [| grunt; runner; tank; flier; boss |]
 
 // ─────────────────────────────────────────────────────────────
 // Headless program plumbing

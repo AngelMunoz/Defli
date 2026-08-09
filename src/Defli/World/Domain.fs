@@ -194,13 +194,15 @@ module EnemyDefs =
     TurretAngle = 0f
   }
 
-  /// Boss — every 5th wave's leader (Phase 6). Slow, deep HP pool,
+  /// Boss — every 5th wave's leader (Phase 6). Slow, solid HP pool,
   /// suppresses nearby towers (BossAura), splits into grunts on death.
   /// Inverse-of-tank palette, rendered 1.6× (Enemies.view).
+  /// 300 base: ~480 on wave 5 (tier 1) — a wall for an early defense,
+  /// not a brick; the ×1.6/tier scaling does the late-game lifting.
   let boss = {
     Key = "boss"
     Archetype = EnemyArchetype.Boss
-    Hp = 500
+    Hp = 300
     Speed = 25f
     GoldReward = 50
     Sprite = "tank_hull_beige"

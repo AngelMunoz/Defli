@@ -149,7 +149,11 @@ module Vfx =
 
     for read in 0 .. pool.Count - 1 do
       let p = pool.Particles[read]
-      let newAlpha = max 0uy (byte(float32 p.Color.A - fadeAmount))
+      // Clamp in FLOAT before the byte conversion: `byte` of a
+      // negative float wraps (conv.u1 takes the low byte — -5.67
+      // becomes 251), resurrecting nearly-dead particles at full
+      // alpha — the "muzzle keeps flashing" ghost.
+      let newAlpha = byte (max 0f (float32 p.Color.A - fadeAmount))
 
       if newAlpha > 0uy then
         let c = Color(p.Color.R, p.Color.G, p.Color.B, newAlpha)

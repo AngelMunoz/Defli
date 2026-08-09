@@ -485,3 +485,6 @@ $RECYCLE.BIN/
 *.nettrace
 *.nettrace.etlx
 *.speedscope.json
+
+# ZCode session artifacts
+.zcode/

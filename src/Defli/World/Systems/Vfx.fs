@@ -18,15 +18,19 @@ open Defli.World
 // (Mibo pooled-particles), one pool per effect kind — each kind
 // draws with its own texture in a single .particles call.
 //
-// Kinds use the kenney_particle_pack assets (added for Phase 2):
-//   Impact   → spark_01  (projectile hits)
-//   Explosion→ flame_01  (cannon splash detonation)
-//   DeathPoof→ smoke_01  (enemy killed)
-//   Muzzle   → muzzle_01 (tower firing)
-//   Placement→ dirt_01   (tower placement dust)
-//   BaseHit  → smoke_01  (enemy reached the base)
+// Kinds and their look (kenney_smoke_particles / particle_pack):
+//   Impact   → spark_01      — tight, fast-fading sparks at the hit
+//   Explosion→ explosion03   — a clustered fireball: quick fade
+//   DeathPoof→ blackSmoke05  — slow puffs that EXPAND, rise, linger
+//   Muzzle   → flash00       — a single stationary flash at the barrel
+//   Placement→ dirt_01       — low dust clumps that settle fast
+//   BaseHit  → blackSmoke05  — a bigger smoke cloud at the base
 //
-// Deterministic bursts — no RNG stream (index-based angles/speeds).
+// The motion model is per-kind (paramsOf): velocity DAMPING stalls
+// the spray near the origin (no more fly-away balls), RISE drifts
+// smoke upward, and GROWTH expands puffs as they fade — the classic
+// smoke look. Deterministic bursts — no RNG stream (index-based
+// angles/speed tiers; golden-angle rotation spread).
 //
 // Texture handles are resolved ONCE and cached on the model: the
 // per-frame `assets.Texture(string)` calls were flagged by the trace
@@ -67,22 +71,31 @@ module Vfx =
 
   let init() = VfxModel()
 
-  /// Per-kind spawn parameters: count, base speed, size, fade speed.
+  /// Per-kind parameters:
+  ///   count  — particles per burst
+  ///   speed  — base spray speed (px/s; tier-multiplied at spawn)
+  ///   size   — initial quad size (px at zoom 1; tiles are 64)
+  ///   fade   — alpha per second (255/fade = seconds of life)
+  ///   growth — size delta per second (smoke expands, sparks shrink)
+  ///   rise   — upward drift (px/s) added to the spray velocity
+  ///   damp   — velocity decay per second (stalls the spray near the
+  ///            origin — the anti "fly-away balls" term)
   let inline private paramsOf(kind: VfxKind) =
     match kind with
-    | Impact -> struct (8, 140f, 12f, 150f)
-    | Explosion -> struct (14, 190f, 26f, 170f)
-    | DeathPoof -> struct (6, 50f, 24f, 60f)
-    | Muzzle -> struct (4, 80f, 16f, 220f)
-    | Placement -> struct (6, 60f, 18f, 140f)
-    | BaseHit -> struct (10, 40f, 30f, 50f)
+    | Impact -> struct (6, 90f, 9f, 700f, -6f, 0f, 6f)
+    | Explosion -> struct (7, 45f, 44f, 420f, 26f, 10f, 5f)
+    | DeathPoof -> struct (5, 25f, 36f, 110f, 14f, 18f, 3f)
+    | Muzzle -> struct (1, 0f, 32f, 640f, 20f, 0f, 0f)
+    | Placement -> struct (5, 26f, 18f, 260f, 10f, 6f, 4f)
+    | BaseHit -> struct (6, 30f, 40f, 130f, 16f, 12f, 3f)
 
   /// Cold path: spawn a burst into the kind's pool (deterministic
-  /// spread — index-based angles, three speed tiers).
+  /// spread — index-based angles, three speed tiers, golden-angle
+  /// rotation so overlapping puffs don't read as copies).
   let update (msg: VfxMsg) (model: VfxModel) : unit =
     match msg with
     | Burst(kind, pos) ->
-      let struct (count, speed, size, _) = paramsOf kind
+      let struct (count, speed, size, _, _, _, _) = paramsOf kind
 
       let pool =
         match kind with
@@ -105,7 +118,7 @@ module Vfx =
           {
             Position = pos
             Size = Vector2(size, size)
-            Rotation = angle * 180f / MathF.PI
+            Rotation = float32 ((i * 137) % 360)
             SourceRect = Rectangle(0f, 0f, 0f, 0f) // full texture — patched in the view
             Color = Color(255uy, 255uy, 255uy, 255uy)
           }
@@ -114,14 +127,21 @@ module Vfx =
         pool.Count <- pool.Count + 1
         i <- i + 1
 
-  let inline private stepPool dt (pool: VfxPool) (fadeSpeed: float32) =
+  let inline private stepPool dt (kind: VfxKind) (pool: VfxPool) =
+    let struct (_, _, _, fadeSpeed, growth, rise, damp) = paramsOf kind
+    let riseVec = Vector2(0f, -rise)
+    let dampMul = max 0f (1f - damp * dt)
+    let growVec = Vector2(growth * dt, growth * dt)
+
     for i in 0 .. pool.Count - 1 do
       let p = pool.Particles[i]
+      pool.Velocities[i] <- pool.Velocities[i] * dampMul
 
       pool.Particles[i] <-
         {
           p with
-              Position = p.Position + pool.Velocities[i] * dt
+              Position = p.Position + (pool.Velocities[i] + riseVec) * dt
+              Size = Vector2.Max(p.Size + growVec, Vector2.One)
         }
 
     let fadeAmount = fadeSpeed * dt
@@ -139,40 +159,34 @@ module Vfx =
 
     pool.Count <- write
 
-  /// Hot path: integrate velocities, fade, compact (in place, zero alloc).
-  /// Velocities are compacted in parallel with the particles.
+  /// Hot path: damp/integrate velocities, drift + grow, fade, compact
+  /// (in place, zero alloc). Velocities are compacted in parallel.
   let tick (dt: float32) (model: VfxModel) : unit =
-    let struct (_, _, _, fadeImpact) = paramsOf VfxKind.Impact
-    let struct (_, _, _, fadeExplosion) = paramsOf VfxKind.Explosion
-    let struct (_, _, _, fadeDeath) = paramsOf VfxKind.DeathPoof
-    let struct (_, _, _, fadeMuzzle) = paramsOf VfxKind.Muzzle
-    let struct (_, _, _, fadePlacement) = paramsOf VfxKind.Placement
-    let struct (_, _, _, fadeBaseHit) = paramsOf VfxKind.BaseHit
-    stepPool dt model.Impact fadeImpact
-    stepPool dt model.Explosion fadeExplosion
-    stepPool dt model.DeathPoof fadeDeath
-    stepPool dt model.Muzzle fadeMuzzle
-    stepPool dt model.Placement fadePlacement
-    stepPool dt model.BaseHit fadeBaseHit
+    stepPool dt VfxKind.Impact model.Impact
+    stepPool dt VfxKind.Explosion model.Explosion
+    stepPool dt VfxKind.DeathPoof model.DeathPoof
+    stepPool dt VfxKind.Muzzle model.Muzzle
+    stepPool dt VfxKind.Placement model.Placement
+    stepPool dt VfxKind.BaseHit model.BaseHit
 
   // ── View (one .particles draw call per kind/texture) ──
   [<Literal>]
   let ImpactPath = "kenney_particle_pack/spark_01.png"
 
   [<Literal>]
-  let ExplosionPath = "kenney_particle_pack/flame_01.png"
+  let ExplosionPath = "kenney_smoke_particles/Explosion/explosion03.png"
 
   [<Literal>]
-  let DeathPoofPath = "kenney_particle_pack/smoke_01.png"
+  let DeathPoofPath = "kenney_smoke_particles/Black smoke/blackSmoke05.png"
 
   [<Literal>]
-  let MuzzlePath = "kenney_particle_pack/muzzle_01.png"
+  let MuzzlePath = "kenney_smoke_particles/Flash/flash00.png"
 
   [<Literal>]
   let PlacementPath = "kenney_particle_pack/dirt_01.png"
 
   [<Literal>]
-  let BaseHitPath = "kenney_particle_pack/smoke_01.png"
+  let BaseHitPath = "kenney_smoke_particles/Black smoke/blackSmoke05.png"
 
   /// Texture per kind (kenney_particle_pack).
   let inline private textureOf(kind: VfxKind) =

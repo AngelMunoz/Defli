@@ -481,3 +481,88 @@ inherent per-frame read-side chain (positions change every frame →
 the joins re-run), which is the library's documented behavior and
 cheap enough that the §5 transient-count lever is no longer worth
 pulling.
+
+## 14. 2026-08-09 Phase-6 Trace — boss waves, warm session (waves 14 → 32)
+
+A 591.1 s capture of the Phase-6 build (boss waves: suppression aura +
+split-on-death), taken after a warm restart at wave 14 and run to wave
+32 — the heaviest load captured so far, with no early-game quiet
+period. Library unchanged (`9bc0d9a`, lazy scalar escapes). Same
+method, same census.
+
+| Fact | Value |
+| --- | --- |
+| Game CPU busy time | 6.0 % of wall (35.6 s — 1.00 ms/frame) |
+| AdaptiveSlop busy share | 44.7 % of busy |
+| AdaptiveSlop wall share | 2.7 % (0.45 ms/frame) |
+| Frame budget used | ~6 % of 16.7 ms — ~17× headroom |
+| `pushMapDelta` write dispatch | 1 sample — the Trace-A regression stays dead |
+| zeroCreate/Create samples | ~3 057 (5.2/s wall, ~86 per busy-second — flat vs Trace B's ~82) |
+
+Microscope (per-frame subtree attribution, % of busy):
+
+- **Homing join: 19.0 %** (Projectiles.view pull, every frame). The
+  per-projectile transform closure is 14.2 % of that — most of the
+  metered cost is our projection lambda (Projections.fs:48-51), not
+  library machinery.
+- **Alive count → Alive filter → Views drain: 8.9 %**, pulled 8.6/8.9
+  by the RoomTick count read (World.fs:298). This drain is now
+  unavoidable once per frame (Towers.tick enumerates Alive, Enemies.view
+  reads it) — lever #1 from §5 is moot: the count node rides for free
+  on a drain real consumers need.
+- **BossPositions chain (NEW): 6.7 %**, pulled by the RoomTick settle
+  read (World.fs:316). A third per-frame drain over Positions, linear
+  in ENEMIES, not bosses — it runs at full cost in boss-free waves
+  because the lazy chain only settles bottom-up (see the World.fs:308
+  comment). The new watch item: ~0.07 ms/frame of pure overhead
+  outside boss waves. Cheap gate candidate: skip the settle read when
+  no boss is alive, or fold boss extraction into the Views drain.
+- **Towers.tick: 9.6 %, now honest sim** — 6.3 % own CPU (target
+  acquisition), 2.0 % gated adaptive reads (cooldownA/targetA).
+  Compare Trace A: 47.2 %, mostly dispatch machinery.
+- **Enemies.tick: 4.1 %, of which 4.0 % `List<int>.AddWithResize`** —
+  Phase-6 split/arrival/expired lists. Game-side, not the library.
+- Strings (printf + AssetsService.Texture): ~2.1 % — housekeeping.
+
+### 14.1 Micro vs macro
+
+Microscopic (busy-time): adaptive frames are on-stack for 44.7 % of
+busy samples, but roughly a third of that is game lambdas executing
+inside the drains (buildViews 6.6 %, buildBossPositions 4.9 %, the
+homing transform ~10 %) — code that would cost the same under any
+evaluation strategy. The library machinery proper (drain/resync/
+gate) is well under half the adaptive share.
+
+Macroscopic (wall-clock): at the heaviest load ever captured, the
+game uses 6 % of its frame budget and adaptive data costs 2.7 % of
+wall time (0.45 ms/frame). The absolute cost tracks entity count
+linearly (0.14 ms/frame at waves 11–16 → 0.45 at waves 14–32 with
+bosses) — no quadratic term anywhere. Extrapolating the linear
+curve, adaptive data reaches 10 % of the frame budget at roughly
+8–10× the current peak entity count.
+
+### 14.2 The trend across all nine captures
+
+| Capture | Busy (% wall) | Adaptive busy-share | Adaptive wall | Adaptive ms/frame |
+| --- | --- | --- | --- | --- |
+| Phase 1 | 0.75 % | 64.9 % | 0.49 % | 0.08 |
+| Wave 28 (flattened) | 6.1 % | 5.3 % | 0.30 % | 0.05 |
+| Start→11 | 0.8 % | 46.9 % | 0.40 % | 0.07 |
+| Phase 3 | 0.9 % | 53.6 % | 0.50 % | 0.08 |
+| Phase 4 | 1.3 % | 49.5 % | 0.62 % | 0.10 |
+| Phase 5 | 6.7 % | 61.5 % | 4.1 % | 0.68 |
+| Trace A (#16 delivery) | 17.1 % | 71.5 % | 12.2 % | 2.04 |
+| Trace B (lazy, PR #17) | 2.0 % | 42.4 % | 0.84 % | 0.14 |
+| Phase 6 (waves 14→32) | 6.0 % | 44.7 % | 2.7 % | 0.45 |
+
+Reading: the lazy design holds at end-game load — vs Trace A at
+comparable load, adaptive wall share is 4.5× lower (2.7 % vs 12.2 %)
+and total CPU 2.9× lower (1.00 vs 2.86 ms/frame). The busy-share is
+honest here (this session has no quiet early game), and it says the
+same thing as the wall share: adaptive read-side work is the largest
+single line item, but the line item is 0.45 ms against a 16.7 ms
+budget. The allocation drip per unit of work is flat (~85 samples per
+busy-second across the last two captures); the write fan-out is gone.
+Watch items, in order: the BossPositions per-frame drain (linear in
+enemies, boss-independent), then the homing transform's own CPU —
+which is game code, not library.

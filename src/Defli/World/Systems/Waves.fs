@@ -31,7 +31,7 @@ type WavesModel() =
 
 module Waves =
 
-  let private buildBanner(m: WavesModel) : aval<string> =
+  let inline private buildBanner(m: WavesModel) : aval<string> =
     m.WaveNumber
     |> AVal.map3
       (fun active scale number ->
@@ -63,9 +63,9 @@ module Waves =
     let interval = max 0.3f (1.2f - float32 number * 0.05f)
     let scale = WaveScale.ofWave number
 
-    let scaleTable(table: struct (EnemyDef * int)[]) =
-      table
-      |> Array.map(fun struct (def, w) -> struct (WaveScale.apply scale def, w))
+    let inline scaleTable(table: struct (EnemyDef * int)[]) = [|
+      for struct (def, w) in table -> struct (WaveScale.apply scale def, w)
+    |]
 
     let table =
       if number % 5 = 0 then
@@ -88,7 +88,10 @@ module Waves =
           struct (EnemyDefs.tank, 1)
         |]
       else
-        scaleTable [| struct (EnemyDefs.grunt, 4); struct (EnemyDefs.runner, 2) |]
+        scaleTable [|
+          struct (EnemyDefs.grunt, 4)
+          struct (EnemyDefs.runner, 2)
+        |]
 
     // Boss waves: the boss leads the pack (spawns with the initial
     // delay, ahead of the weighted picks), tier-scaled like the rest.
@@ -114,10 +117,13 @@ module Waves =
     : struct (WavesModel * WaveEvent[]) =
     match msg with
     | StartNextWave ->
-      if model.WaveActive.Value then
+      let waveActive = model.WaveActive |> AVal.getValue
+
+      if waveActive then
         model, Array.empty
       else
-        let number = model.WaveNumber.Value + 1
+        let waveNumber = model.WaveNumber |> AVal.getValue
+        let number = waveNumber + 1
         let wave = composeWave number
 
         Transaction.run(fun () ->
@@ -133,11 +139,11 @@ module Waves =
   let tick
     (dt: float32)
     (model: WavesModel)
-    (aliveCount: int)
+    (aliveCount: aval<int>)
     (queueEmpty: bool)
     : struct (WavesModel * WaveEvent seq) =
-    if model.WaveActive.Value then
-      if aliveCount = 0 && queueEmpty then
+    if model.WaveActive |> AVal.getValue then
+      if aliveCount |> AVal.getValue = 0 && queueEmpty then
         model.WaveActive.Set false
         model, [| WaveCleared |]
       else

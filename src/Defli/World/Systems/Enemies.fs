@@ -24,7 +24,6 @@ open Defli.World
 //   Views      = Positions × Healths × Motions join (AMap.mapA +
 //                per-element tryFind avals — one ElementMapNode)
 //   Alive      = Views |> filter Hp > 0 (targeting/render query)
-//   AliveCount = AMap.count (delta-maintained aggregate)
 // ─────────────────────────────────────────────────────────────
 
 [<Struct>]
@@ -59,8 +58,6 @@ type EnemiesModel() =
   member val Alive: amap<int<EnemyId>, EnemyView> =
     Unchecked.defaultof<_> with get, set
 
-  member val AliveCount: aval<int> = Unchecked.defaultof<_> with get, set
-
   /// Live boss positions (Positions × Defs, archetype-filtered) — the
   /// world-owned Suppression projection joins on this (Phase 6).
   member val BossPositions: amap<int<EnemyId>, Vector2> =
@@ -78,8 +75,8 @@ module Enemies =
     // mid-transaction reads (Alive filters it out).
     m.Positions
     |> AMap.mapA(fun eid pos ->
-      let healths: aval<Health voption> = m.Healths |> AMap.tryFind eid
-      let motions: aval<Motion voption> = m.Motions |> AMap.tryFind eid
+      let healths = m.Healths |> AMap.tryFind eid
+      let motions = m.Motions |> AMap.tryFind eid
 
       let inline matchA (h: Health voption) (mv: Motion voption) =
         match struct (h, mv) with
@@ -106,14 +103,13 @@ module Enemies =
   let private buildAlive(m: EnemiesModel) : amap<int<EnemyId>, EnemyView> =
     m.Views |> AMap.filter(fun _ v -> v.Hp > 0)
 
-  let private buildAliveCount(m: EnemiesModel) : aval<int> =
-    m.Alive |> AMap.count
-
   /// Boss positions: per-enemy tryFind into Defs (the Views-join
   /// shape), kept only when the archetype is Boss. Written by the
   /// movement tick like Positions; read by the world's Suppression
   /// projection.
-  let private buildBossPositions(m: EnemiesModel) : amap<int<EnemyId>, Vector2> =
+  let private buildBossPositions
+    (m: EnemiesModel)
+    : amap<int<EnemyId>, Vector2> =
     m.Positions
     |> AMap.chooseA(fun eid pos ->
       m.Defs
@@ -131,7 +127,6 @@ module Enemies =
     let m = EnemiesModel()
     m.Views <- buildViews m
     m.Alive <- buildAlive m
-    m.AliveCount <- buildAliveCount m
     m.BossPositions <- buildBossPositions m
     m
 
@@ -216,6 +211,77 @@ module Enemies =
 
   // ── Hot path (movement / "physics" phase) — direct values, no closures ──
 
+  // ── Per-enemy movement, staged into inline helpers (the JIT fuses
+  // them back together — no closures, no per-frame allocations) ──
+
+  /// Stage 1 — resolve the archetype (defs are written once at spawn;
+  /// a miss is a transient row → Grunt).
+  let inline archetypeOf defs eid =
+    defs
+    |> CMap.tryGetValue eid
+    |> ValueOption.map _.Archetype
+    |> ValueOption.defaultValue Grunt
+
+  /// Stage 2 — fliers: interpolate the straight line spawn → base.
+  /// Returns (pos, progress, arrived); PathIndex is meaningless (0).
+  let inline flyStep
+    (dt: float32)
+    (mv: Motion)
+    (flyDist: float32)
+    (spawn: Vector2)
+    (basePos: Vector2)
+    : struct (Vector2 * float32 * bool) =
+    let step =
+      if flyDist <= 0f then
+        1f
+      else
+        mv.Speed * mv.Slow * dt / flyDist
+
+    let progress = min 1f (mv.Progress + step)
+    struct (Vector2.Lerp(spawn, basePos, progress), progress, progress >= 1f)
+
+  /// Stage 3 — road walkers (Grunt/Runner/Tank/Boss): consume the
+  /// `Speed * Slow * dt` step along the waypoint segments, advancing
+  /// PathIndex. Returns (pos, pathIndex, progress, arrived).
+  let inline walkStep
+    (dt: float32)
+    (mv: Motion)
+    (pos: Vector2)
+    (path: Vector2[])
+    : struct (Vector2 * int * float32 * bool) =
+    let mutable p = pos
+    let mutable idx = mv.PathIndex
+    let mutable remaining = mv.Speed * mv.Slow * dt
+
+    while remaining > 0f && idx < path.Length - 1 do
+      let target = path[idx + 1]
+      let d = target - p
+      let dist = d.Length()
+
+      if dist <= remaining then
+        p <- target
+        remaining <- remaining - dist
+        idx <- idx + 1
+      else
+        p <- p + (d / dist) * remaining
+        remaining <- 0f
+
+    let arrived = idx >= path.Length - 1
+    let total = float32(path.Length - 1)
+
+    let progress =
+      if arrived then
+        1f
+      else
+        let segLen = Vector2.Distance(path[idx], path[idx + 1])
+
+        if segLen <= 0f then
+          float32 idx / total
+        else
+          (Vector2.Distance(path[idx], p) / segLen + float32 idx) / total
+
+    p, idx, progress, arrived
+
   let tick
     (dt: float32)
     (model: EnemiesModel)
@@ -244,71 +310,27 @@ module Enemies =
 
     // Movement along waypoints. Fliers ignore the road: they interpolate
     // the straight line spawn → base (world-space, not waypoint walking).
-    let total = float32(path.Length - 1)
     let flyDist = Vector2.Distance(path[0], path[path.Length - 1])
+
     let mutable events: ResizeArray<EnemyEvent> = null
     let mutable arrivals: ResizeArray<int<EnemyId>> = null
 
     for KeyValueV(eid, pos) in model.Positions |> AMap.getValue do
-      match model.Motions |> CMap.tryGetValue eid with
-      | ValueNone -> ()
-      | ValueSome mv ->
-        let archetype =
-          model.Defs
-          |> CMap.tryGetValue eid
-          |> ValueOption.map(fun def -> def.Archetype)
-          |> ValueOption.defaultValue EnemyArchetype.Grunt
+      model.Motions
+      |> CMap.tryGetValue eid
+      |> ValueOption.iter(fun mv ->
+        // The archetype picks the locomotion: fliers fly the straight
+        // line spawn → base, everyone else walks the waypoints.
+        let archetype = archetypeOf model.Defs eid
 
-        let mutable p = pos
-        let mutable idx = mv.PathIndex
-        let mutable progress = mv.Progress
-        let mutable arrived = false
+        let struct (p, idx, progress, arrived) =
+          if archetype = EnemyArchetype.Flier then
+            let struct (p, progress, arrived) =
+              flyStep dt mv flyDist path[0] path[path.Length - 1]
 
-        if archetype = EnemyArchetype.Flier then
-          // Straight-line flight: progress along spawn → base.
-          let step =
-            if flyDist <= 0f then
-              1f
-            else
-              (mv.Speed * mv.Slow * dt) / flyDist
-
-          progress <- min 1f (progress + step)
-          p <- Vector2.Lerp(path[0], path[path.Length - 1], progress)
-          idx <- 0
-          arrived <- progress >= 1f
-        else
-          // Waypoint walking (Grunt/Runner/Tank/Boss).
-          let mutable remaining = mv.Speed * mv.Slow * dt
-
-          while remaining > 0f && not arrived do
-            if idx >= path.Length - 1 then
-              arrived <- true
-            else
-              let target = path[idx + 1]
-              let d = target - p
-              let dist = d.Length()
-
-              if dist <= remaining then
-                p <- target
-                remaining <- remaining - dist
-                idx <- idx + 1
-              else
-                p <- p + (d / dist) * remaining
-                remaining <- 0f
-
-          if idx >= path.Length - 1 then
-            arrived <- true
-
-          progress <-
-            if idx >= path.Length - 1 then
-              1f
-            else
-              let segLen = Vector2.Distance(path[idx], path[idx + 1])
-
-              if segLen <= 0f then
-                float32 idx / total
-              else
-                (Vector2.Distance(path[idx], p) / segLen + float32 idx) / total
+            struct (p, 0, progress, arrived)
+          else
+            walkStep dt mv pos path
 
         if arrived then
           if isNull arrivals then
@@ -328,7 +350,7 @@ module Enemies =
             mv with
                 Progress = progress
                 PathIndex = idx
-          }
+          })
 
     // Arrivals are removed atomically (the router also gets ReachedBase).
     if not(isNull arrivals) then
@@ -360,7 +382,7 @@ module Enemies =
       defs
       |> ReadOnlyDict.tryGetValue eid
       |> ValueOption.iter(fun def ->
-        let isBoss = def.Archetype = EnemyArchetype.Boss
+        let isBoss = def.Archetype = Boss
 
         // Boss aura ring (Phase 6): the suppression radius, drawn
         // faintly under everything else the boss overlaps.
@@ -377,14 +399,14 @@ module Enemies =
         // Heading: fliers fly the straight spawn → base line; the rest
         // aim at the next waypoint (0° = up; raylib rotates CW).
         let angle =
-          if def.Archetype = EnemyArchetype.Flier then
+          if def.Archetype = Flier then
             let d = path[path.Length - 1] - path[0]
-            (MathF.Atan2(d.Y, d.X) * 180f / MathF.PI) % 360f
+            MathF.Atan2(d.Y, d.X) * 180f / MathF.PI % 360f
           elif v.PathIndex >= path.Length - 1 then
             0f
           else
             let d = path[v.PathIndex + 1] - v.Pos
-            (MathF.Atan2(d.Y, d.X) * 180f / MathF.PI) % 360f
+            MathF.Atan2(d.Y, d.X) * 180f / MathF.PI % 360f
 
         // Bosses render 1.6× — the silhouette must read at a glance.
         let sizeBoost = if isBoss then 1.6f else 1f
@@ -393,7 +415,9 @@ module Enemies =
         |> Tiles.tryByName
         |> ValueOption.iter(fun tile ->
           // Scale the baked sprite to a consistent ~44px while keeping aspect.
-          let scale = 44f * sizeBoost / max (float32 tile.Width) (float32 tile.Height)
+          let scale =
+            44f * sizeBoost / max (float32 tile.Width) (float32 tile.Height)
+
           let w = float32 tile.Width * scale
           let h = float32 tile.Height * scale
 
@@ -416,7 +440,8 @@ module Enemies =
         |> ValueOption.bind Tiles.tryByName
         |> ValueOption.iter(fun turretTile ->
           let tscale =
-            44f * sizeBoost / max (float32 turretTile.Width) (float32 turretTile.Height)
+            44f * sizeBoost
+            / max (float32 turretTile.Width) (float32 turretTile.Height)
 
           let tw = float32 turretTile.Width * tscale
           let th = float32 turretTile.Height * tscale

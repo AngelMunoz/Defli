@@ -73,13 +73,21 @@ let tests =
 
       Expect.equal (aliveView m').Count 1 "only runner alive"
       Expect.equal (viewsView m').Count 2 "corpse still joined"
-      Expect.equal (AVal.getValue m'.AliveCount) 1 "count follows Alive"
+
+      Expect.equal
+        (m'.Alive |> AMap.count |> AVal.getValue)
+        1
+        "count follows Alive"
 
       let struct (m2, _) =
         Enemies.update (EnemyMsg.Despawn(0<EnemyId>)) m' map.Path
 
       Expect.equal (viewsView m2).Count 1 "corpse removed"
-      Expect.equal (AVal.getValue m2.AliveCount) 1 "count unchanged")
+
+      Expect.equal
+        (m2.Alive |> AMap.count |> AVal.getValue)
+        1
+        "count unchanged")
 
     testCase "repeated reads at a settled state are stable" (fun () ->
       let mutable m = spawn (Enemies.init()) Fixtures.tank
@@ -96,45 +104,47 @@ let tests =
         | ValueSome v2 -> Expect.equal v v2 "stable row"
         | ValueNone -> failtest "row vanished")
 
-    testCase "PlacementPreview affordability follows the selected tower" (fun () ->
-      let economy = Economy.Economy.init cfg // gold 100
-      let towers = Towers.Towers.init()
-      let projectiles = Projectiles.Projectiles.init()
-      let hover = CVal.create(ValueSome(struct (1, 1))) // buildable grass
-      let selected = CVal.create TowerDefs.frost
+    testCase
+      "PlacementPreview affordability follows the selected tower"
+      (fun () ->
+        let economy = Economy.Economy.init cfg // gold 100
+        let towers = Towers.Towers.init()
+        let projectiles = Projectiles.Projectiles.init()
+        let hover = CVal.create(ValueSome(struct (1, 1))) // buildable grass
+        let selected = CVal.create TowerDefs.frost
 
-      let projections =
-        Projections(
-          Enemies.init(),
-          towers,
-          projectiles,
-          economy,
-          MapModel.buildableGrid map,
-          hover,
-          selected
-        )
+        let projections =
+          Projections(
+            Enemies.init(),
+            towers,
+            projectiles,
+            economy,
+            MapModel.buildableGrid map,
+            hover,
+            selected
+          )
 
-      // Gold 100 ≥ frost 80 → affordable.
-      Expect.equal
-        (AVal.getValue projections.PlacementPreview)
-        PlacementStatus.Affordable
-        "affordable at 100"
+        // Gold 100 ≥ frost 80 → affordable.
+        Expect.equal
+          (AVal.getValue projections.PlacementPreview)
+          PlacementStatus.Affordable
+          "affordable at 100"
 
-      // 60: enough for the arrow (50), NOT for the frost (80) — the
-      // preview must reflect the SELECTED tower, not the cheapest.
-      economy.Gold |> CVal.set 60
+        // 60: enough for the arrow (50), NOT for the frost (80) — the
+        // preview must reflect the SELECTED tower, not the cheapest.
+        economy.Gold |> CVal.set 60
 
-      Expect.equal
-        (AVal.getValue projections.PlacementPreview)
-        PlacementStatus.TooExpensive
-        "frost too expensive at 60"
+        Expect.equal
+          (AVal.getValue projections.PlacementPreview)
+          PlacementStatus.TooExpensive
+          "frost too expensive at 60"
 
-      selected |> CVal.set TowerDefs.arrow
+        selected |> CVal.set TowerDefs.arrow
 
-      Expect.equal
-        (AVal.getValue projections.PlacementPreview)
-        PlacementStatus.Affordable
-        "arrow affordable at 60")
+        Expect.equal
+          (AVal.getValue projections.PlacementPreview)
+          PlacementStatus.Affordable
+          "arrow affordable at 60")
 
     testCase "game over aval follows lives" (fun () ->
       let e = Economy.init cfg
@@ -203,7 +213,10 @@ let tests =
           e3
           map.Path
 
-      Expect.equal (factorOf(0<TowerId>)) (ValueSome 1f) "grunts don't suppress"
+      Expect.equal
+        (factorOf(0<TowerId>))
+        (ValueSome 1f)
+        "grunts don't suppress"
 
       // A boss OUTSIDE the radius (200 px away > Radius 128) doesn't either.
       let struct (e5, _) =

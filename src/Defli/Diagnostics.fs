@@ -7,8 +7,8 @@ open Mibo
 open Mibo.Elmish.Graphics
 open Mibo.Elmish.Graphics2D
 open Raylib_cs
+open AdaptiveSlop.Core
 open Defli.World
-
 // ─────────────────────────────────────────────────────────────
 // Diagnostics overlay — Kimo's Systems/Diagnostics.fs pattern,
 // simplified for the same-thread world: no bridge, no per-world
@@ -109,14 +109,14 @@ module Diagnostics =
   /// Folds one RoomTick into the world diagnostics: windowed tick rate,
   /// sim cost EMA, live counts. t0 is the tickStart() stamp; alive/queue
   /// are the direct values already computed by the router this tick.
-  let tickEnd (t0: int64) (diag: WorldDiag) (alive: int) (queue: int) =
+  let tickEnd (t0: int64) (diag: WorldDiag) (alive: aval<int>) (queue: int) =
     let now = Stopwatch.GetTimestamp()
     diag.TickCount <- diag.TickCount + 1L
 
     let simMs = float32(Stopwatch.GetElapsedTime(t0, now).TotalMilliseconds)
 
     diag.SimMs <- diag.SimMs * 0.9f + simMs * 0.1f
-    diag.AliveEnemies <- alive
+    diag.AliveEnemies <- alive |> AVal.getValue
     diag.QueueCount <- queue
 
     if diag.WindowStartStamp = 0L then

@@ -19,7 +19,7 @@ let tests =
     testCase "difficulty tiers scale every 5 waves" (fun () ->
       // Waves 1-4: base stats. Wave 5: ×1.6 hp / ×1.07 speed / ×1.2
       // reward. Wave 10: the same multipliers squared.
-      let hpOf (w: WaveDef) =
+      let hpOf(w: WaveDef) =
         let struct (def, _) = w.Table[0]
         def.Hp
 
@@ -28,14 +28,19 @@ let tests =
       let w10 = Waves.composeWave 10
 
       Expect.equal (hpOf w1) EnemyDefs.grunt.Hp "wave 1 unscaled"
-      Expect.equal (hpOf w5) (int(float EnemyDefs.grunt.Hp * 1.6)) "wave 5 ×1.6"
+
+      Expect.equal
+        (hpOf w5)
+        (int(float EnemyDefs.grunt.Hp * 1.6))
+        "wave 5 ×1.6"
+
       Expect.equal
         (hpOf w10)
         (int(float EnemyDefs.grunt.Hp * 1.6 * 1.6))
         "wave 10 ×1.6²"
 
       // Rewards scale too, and never collapse to zero.
-      let rewardOf (w: WaveDef) =
+      let rewardOf(w: WaveDef) =
         let struct (def, _) = w.Table[0]
         def.GoldReward
 
@@ -51,7 +56,7 @@ let tests =
 
       Expect.equal
         (AVal.getValue m.Scale).Hp
-        (float32 (1.6 ** 2.0))
+        (float32(1.6 ** 2.0))
         "tier 2 scale")
 
     testCase "fliers enter the tables from wave 4" (fun () ->
@@ -72,7 +77,8 @@ let tests =
       let w2 = Waves.composeWave 2
 
       Expect.isFalse
-        (w2.Table |> Array.exists(fun struct (def, _) -> def.Key = EnemyDefs.flier.Key))
+        (w2.Table
+         |> Array.exists(fun struct (def, _) -> def.Key = EnemyDefs.flier.Key))
         "early waves have no fliers")
 
     testCase "composition is deterministic (no RNG in the director)" (fun () ->
@@ -106,7 +112,9 @@ let tests =
 
       // Regular waves have no extras.
       for n in [ 1; 2; 3; 4; 6; 7 ] do
-        Expect.isEmpty (Waves.composeWave n).ExtraSpawns $"wave %d{n} no extras")
+        Expect.isEmpty
+          (Waves.composeWave n).ExtraSpawns
+          $"wave %d{n} no extras")
 
     testCase "StartNextWave composes + activates, then refuses" (fun () ->
       let m = Waves.init()
@@ -129,11 +137,11 @@ let tests =
       let struct (m', _) = Waves.update WaveMsg.StartNextWave m
 
       // Still spawning: no clear.
-      let struct (m2, events) = Waves.tick 0.1f m' 3 false
+      let struct (m2, events) = Waves.tick 0.1f m' (AVal.constant 3) false
       Expect.equal (events |> Seq.length) 0 "not cleared with enemies alive"
 
       // Queue empty and no enemies: cleared.
-      let struct (m3, events) = Waves.tick 0.1f m2 0 true
+      let struct (m3, events) = Waves.tick 0.1f m2 (AVal.constant 0) true
 
       match events |> Seq.tryHead with
       | Some WaveCleared -> ()

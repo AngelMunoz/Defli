@@ -123,7 +123,7 @@ module World =
           let isBoss =
             model.Enemies.Defs
             |> CMap.tryGetValue eid
-            |> ValueOption.exists(fun d -> d.Archetype = EnemyArchetype.Boss)
+            |> ValueOption.exists(fun d -> d.Archetype = Boss)
 
           if isBoss then
             let struct (progress, pathIndex) =
@@ -263,7 +263,9 @@ module World =
 
             Cmd.ofMsg(VfxMsg(Vfx.Burst(Vfx.VfxKind.Explosion, impact.Pos)))
           else
-            Cmd.ofMsg(EnemyMsg(Enemies.ApplyDamage(impact.Enemy, impact.Damage)))
+            Cmd.ofMsg(
+              EnemyMsg(Enemies.ApplyDamage(impact.Enemy, impact.Damage))
+            )
 
             if impact.SlowFactor < 1f then
               Cmd.ofMsg(
@@ -288,6 +290,7 @@ module World =
     | RoomTick gt ->
       let dt = float32 gt.ElapsedGameTime.TotalSeconds
       let t0 = Diagnostics.tickStart()
+      let aliveCount = model.Enemies.Alive |> AMap.count
 
       // Kimo's system organization: movement/"physics" first, then the
       // spawn/queue phases; read-only consumers after.
@@ -295,7 +298,6 @@ module World =
         Enemies.Enemies.tick dt model.Enemies model.Map.Path
 
       let struct (_, spawnEvents) = Spawning.Spawning.tick dt model.Spawning
-      let aliveCount = model.Enemies.Alive |> AMap.count |> AVal.getValue
 
       let struct (_, waveEvents) =
         Waves.Waves.tick

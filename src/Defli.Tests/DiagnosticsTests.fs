@@ -4,6 +4,7 @@ open System
 open System.Diagnostics
 open Expecto
 open Defli
+open AdaptiveSlop.Core
 
 // ─────────────────────────────────────────────────────────────
 // Windowed diagnostics — FrameDiag is driven with SYNTHETIC
@@ -92,9 +93,9 @@ let tests =
 
       // Real tickStart/tickEnd pairs (the window needs real time to
       // elapse; the state asserted here does not).
-      Diagnostics.tickEnd (Diagnostics.tickStart()) diag 4 2
-      Diagnostics.tickEnd (Diagnostics.tickStart()) diag 4 2
-      Diagnostics.tickEnd (Diagnostics.tickStart()) diag 7 0
+      Diagnostics.tickEnd (Diagnostics.tickStart()) diag (AVal.constant 4) 2
+      Diagnostics.tickEnd (Diagnostics.tickStart()) diag (AVal.constant 4) 2
+      Diagnostics.tickEnd (Diagnostics.tickStart()) diag (AVal.constant 7) 0
 
       Expect.equal diag.TickCount 3L "tick count"
       Expect.isTrue (diag.SimMs >= 0f) "sim ms sampled"

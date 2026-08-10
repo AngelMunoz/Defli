@@ -33,7 +33,11 @@ module Economy =
   let update (msg: EconomyMsg) (model: EconomyModel) : unit =
     match msg with
     | SpendGold amount ->
-      model.Gold.UpdateTo(max 0 (model.Gold.Value - amount)) |> ignore
+      let gold = model.Gold |> AVal.getValue
+      model.Gold.UpdateTo(max 0 (gold - amount)) |> ignore
     | EarnGold amount ->
-      model.Gold.UpdateTo(model.Gold.Value + amount) |> ignore
-    | LoseLife -> model.Lives.UpdateTo(max 0 (model.Lives.Value - 1)) |> ignore
+      let gold = model.Gold |> AVal.getValue
+      model.Gold.UpdateTo(gold + amount) |> ignore
+    | LoseLife ->
+      let lives = model.Lives |> AVal.getValue
+      model.Lives.UpdateTo(max 0 (lives - 1)) |> ignore

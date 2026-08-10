@@ -20,7 +20,9 @@ let private cfg = TestData.Fixtures.cfg
 
 let private goldOf(m: WorldModel) = AVal.getValue m.Economy.Gold
 let private livesOf(m: WorldModel) = AVal.getValue m.Economy.Lives
-let private aliveOf(m: WorldModel) = AVal.getValue m.Enemies.AliveCount
+
+let private aliveOf(m: WorldModel) =
+  m.Enemies.Alive |> AMap.count |> AVal.getValue
 
 // ── Phase 6: boss-wave helpers ──
 
@@ -148,8 +150,9 @@ let tests =
       runner.StepN(2, TestData.dt)
 
       let model = runner.Model
+      let statistics = model.Towers.Statics
       Expect.equal (goldOf model) cfg.StartingGold "no gold spent"
-      Expect.equal ((model.Towers.Statics |> AMap.getValue).Count) 0 "no tower")
+      Expect.equal (statistics |> AMap.count |> AVal.getValue) 0 "no tower")
 
     testCase "PlaceTower on an occupied cell is rejected" (fun () ->
       let runner = TestData.mkRunner cfg
@@ -210,7 +213,7 @@ let tests =
         // reaches the enemy (240 px/s, enemy ~64 px away).
         let fired =
           runner.StepUntil(
-            (fun m -> (m.Projectiles.Rows |> AMap.getValue).Count > 0),
+            (fun m -> m.Projectiles.Rows |> AMap.count |> AVal.getValue > 0),
             TestData.dt,
             120
           )
@@ -221,7 +224,7 @@ let tests =
           runner.StepUntil(
             (fun m ->
               (m.Projectiles.Rows |> AMap.getValue).Count = 0
-              && AVal.getValue m.Enemies.AliveCount = 0),
+              && m.Enemies.Alive |> AMap.count |> AVal.getValue = 0),
             TestData.dt,
             120
           )
@@ -273,8 +276,7 @@ let tests =
       Expect.isTrue fired "tower fired after upgrade"
 
       match
-        (runner.Model.Projectiles.Rows |> AMap.getValue)
-        |> Seq.tryHead
+        (runner.Model.Projectiles.Rows |> AMap.getValue) |> Seq.tryHead
       with
       | Some(KeyValueV(_, row)) ->
         Expect.equal
@@ -327,8 +329,7 @@ let tests =
         Expect.equal mv.Slow 0.5f "enemy slowed"
 
         let slowed =
-          model.Enemies.SlowTimers
-          |> Dictionary.tryGetValue(0<EnemyId>)
+          model.Enemies.SlowTimers |> Dictionary.tryGetValue(0<EnemyId>)
 
         Expect.isTrue slowed.IsSome "slow timer running"
       | ValueNone -> failtest "enemy must exist")
@@ -358,7 +359,7 @@ let tests =
       // One shell (25 dmg > 10 hp): the blast kills BOTH.
       let cleared =
         runner.StepUntil(
-          (fun m -> AVal.getValue m.Enemies.AliveCount = 0),
+          (fun m -> m.Enemies.Alive |> AMap.count |> AVal.getValue = 0),
           TestData.dt,
           120
         )
@@ -371,141 +372,147 @@ let tests =
          + 2 * TestData.Fixtures.runner.GoldReward)
         "both kills rewarded")
 
-    testCase "target dies mid-flight: the shell detonates and splashes the pack" (fun () ->
-      let runner = TestData.mkRunner cfg
+    testCase
+      "target dies mid-flight: the shell detonates and splashes the pack"
+      (fun () ->
+        let runner = TestData.mkRunner cfg
 
-      runner.Dispatch(WorldMsg.EconomyMsg(EconomyMsg.EarnGold 60))
-      runner.Dispatch(WorldMsg.SelectTower TowerDefs.cannon)
-      runner.Dispatch(WorldMsg.PlaceTower(struct (1, 3)))
-      runner.StepN(2, TestData.dt)
+        runner.Dispatch(WorldMsg.EconomyMsg(EconomyMsg.EarnGold 60))
+        runner.Dispatch(WorldMsg.SelectTower TowerDefs.cannon)
+        runner.Dispatch(WorldMsg.PlaceTower(struct (1, 3)))
+        runner.StepN(2, TestData.dt)
 
-      runner.Dispatch(
-        WorldMsg.EnemyMsg(Enemies.EnemyMsg.Spawn TestData.Fixtures.runner)
-      )
-
-      runner.Dispatch(
-        WorldMsg.EnemyMsg(Enemies.EnemyMsg.Spawn TestData.Fixtures.runner)
-      )
-
-      // Wait for the cannon's shell to be in flight.
-      let fired =
-        runner.StepUntil(
-          (fun m -> (m.Projectiles.Rows |> AMap.getValue).Count > 0),
-          TestData.dt,
-          120
+        runner.Dispatch(
+          WorldMsg.EnemyMsg(Enemies.EnemyMsg.Spawn TestData.Fixtures.runner)
         )
 
-      Expect.isTrue fired "cannon fired within budget"
-
-      // Kill the shell's target mid-flight (another tower's kill, say).
-      let target =
-        (runner.Model.Projectiles.Rows |> AMap.getValue)
-        |> Seq.head
-        |> fun (KeyValueV(_, row)) -> row.TargetEnemy
-
-      runner.Dispatch(
-        WorldMsg.EnemyMsg(Enemies.EnemyMsg.ApplyDamage(target, 999))
-      )
-
-      // The shell must NOT vanish: it flies to the corpse's last
-      // position and the blast takes out the stacked survivor.
-      let cleared =
-        runner.StepUntil(
-          (fun m -> AVal.getValue m.Enemies.AliveCount = 0),
-          TestData.dt,
-          120
+        runner.Dispatch(
+          WorldMsg.EnemyMsg(Enemies.EnemyMsg.Spawn TestData.Fixtures.runner)
         )
 
-      Expect.isTrue cleared "survivor died to the detonation splash"
+        // Wait for the cannon's shell to be in flight.
+        let fired =
+          runner.StepUntil(
+            (fun m -> (m.Projectiles.Rows |> AMap.getValue).Count > 0),
+            TestData.dt,
+            120
+          )
 
-      Expect.equal
-        (goldOf runner.Model)
-        (cfg.StartingGold + 60 - TowerDefs.cannon.Cost
-         + 2 * TestData.Fixtures.runner.GoldReward)
-        "manual kill + splash kill both rewarded")
+        Expect.isTrue fired "cannon fired within budget"
+
+        // Kill the shell's target mid-flight (another tower's kill, say).
+        let target =
+          (runner.Model.Projectiles.Rows |> AMap.getValue)
+          |> Seq.head
+          |> fun (KeyValueV(_, row)) -> row.TargetEnemy
+
+        runner.Dispatch(
+          WorldMsg.EnemyMsg(Enemies.EnemyMsg.ApplyDamage(target, 999))
+        )
+
+        // The shell must NOT vanish: it flies to the corpse's last
+        // position and the blast takes out the stacked survivor.
+        let cleared =
+          runner.StepUntil(
+            (fun m -> m.Enemies.Alive |> AMap.count |> AVal.getValue = 0),
+            TestData.dt,
+            120
+          )
+
+        Expect.isTrue cleared "survivor died to the detonation splash"
+
+        Expect.equal
+          (goldOf runner.Model)
+          (cfg.StartingGold + 60 - TowerDefs.cannon.Cost
+           + 2 * TestData.Fixtures.runner.GoldReward)
+          "manual kill + splash kill both rewarded")
 
     // ── Phase 6: boss waves through the router ──
 
-    testCase "boss wave: the boss spawns and suppresses a road-side tower" (fun () ->
-      let runner = TestData.mkRunner cfg
+    testCase
+      "boss wave: the boss spawns and suppresses a road-side tower"
+      (fun () ->
+        let runner = TestData.mkRunner cfg
 
-      runner.Dispatch(WorldMsg.PlaceTower(struct (2, 3)))
-      runner.StepN(2, TestData.dt)
+        runner.Dispatch(WorldMsg.PlaceTower(struct (2, 3)))
+        runner.StepN(2, TestData.dt)
 
-      startBossWave runner
+        startBossWave runner
 
-      // The boss leads (1.5 s delay) — it must appear among the defs.
-      let bossUp =
-        runner.StepUntil((fun m -> (bossIdOf m).IsSome), TestData.dt, 60)
+        // The boss leads (1.5 s delay) — it must appear among the defs.
+        let bossUp =
+          runner.StepUntil((fun m -> (bossIdOf m).IsSome), TestData.dt, 60)
 
-      Expect.isTrue bossUp "boss spawned"
+        Expect.isTrue bossUp "boss spawned"
 
-      // The boss walks the road (row 4, y = 288); it enters the tower's
-      // aura radius (128 px of (160, 224)) after ~5 s. Tower dps is far
-      // too low to kill it first (arrow 22.5 dps vs 800 hp).
-      let suppressed =
-        runner.StepUntil(
-          (fun m ->
-            m.Projections.Suppression
-            |> AMap.getValue
-            |> ReadOnlyDict.tryGetValue(0<TowerId>)
-            |> ValueOption.exists(fun f -> f = BossAura.Factor)),
-          TestData.dt,
-          200
+        // The boss walks the road (row 4, y = 288); it enters the tower's
+        // aura radius (128 px of (160, 224)) after ~5 s. Tower dps is far
+        // too low to kill it first (arrow 22.5 dps vs 800 hp).
+        let suppressed =
+          runner.StepUntil(
+            (fun m ->
+              m.Projections.Suppression
+              |> AMap.getValue
+              |> ReadOnlyDict.tryGetValue(0<TowerId>)
+              |> ValueOption.exists(fun f -> f = BossAura.Factor)),
+            TestData.dt,
+            200
+          )
+
+        Expect.isTrue suppressed "tower suppressed while the boss is near")
+
+    testCase
+      "boss killed → split children spawn, wave does NOT clear early"
+      (fun () ->
+        let runner = TestData.mkRunner cfg
+
+        // No towers: nothing else kills the children; they will leak.
+        startBossWave runner
+
+        let bossUp =
+          runner.StepUntil((fun m -> (bossIdOf m).IsSome), TestData.dt, 60)
+
+        Expect.isTrue bossUp "boss spawned"
+
+        let bossId = (bossIdOf runner.Model).Value
+        let aliveBefore = aliveOf runner.Model
+
+        runner.Dispatch(
+          WorldMsg.EnemyMsg(Enemies.EnemyMsg.ApplyDamage(bossId, 99999))
         )
 
-      Expect.isTrue suppressed "tower suppressed while the boss is near")
+        runner.StepN(2, TestData.dt)
 
-    testCase "boss killed → split children spawn, wave does NOT clear early" (fun () ->
-      let runner = TestData.mkRunner cfg
+        let model = runner.Model
 
-      // No towers: nothing else kills the children; they will leak.
-      startBossWave runner
+        // The split is synchronous: children exist the same dispatch.
+        // alive = before − 1 (boss) + SplitCount (children).
+        Expect.equal
+          (aliveOf model)
+          (aliveBefore - 1 + BossAura.SplitCount)
+          "split children spawned"
 
-      let bossUp =
-        runner.StepUntil((fun m -> (bossIdOf m).IsSome), TestData.dt, 60)
+        Expect.isTrue
+          (AVal.getValue model.Waves.WaveActive)
+          "the split frame must not clear the wave"
 
-      Expect.isTrue bossUp "boss spawned"
+        // The boss paid its reward (kill) — children pay theirs on death.
+        // Wave 5 is tier 1: the reward is scaled ×1.2.
+        Expect.equal
+          (goldOf model)
+          (cfg.StartingGold + int(float EnemyDefs.boss.GoldReward * 1.2))
+          "boss reward paid"
 
-      let bossId = (bossIdOf runner.Model).Value
-      let aliveBefore = aliveOf runner.Model
+        // The wave eventually clears (children + pack leak; lives 20 ≥
+        // wave-5 count 15 + 3 children + boss... boss was killed, so
+        // 15 + 3 = 18 leaks ≤ 20 lives).
+        let cleared =
+          runner.StepUntil(
+            (fun m -> not(AVal.getValue m.Waves.WaveActive)),
+            TestData.dt,
+            4000
+          )
 
-      runner.Dispatch(
-        WorldMsg.EnemyMsg(Enemies.EnemyMsg.ApplyDamage(bossId, 99999))
-      )
-
-      runner.StepN(2, TestData.dt)
-
-      let model = runner.Model
-
-      // The split is synchronous: children exist the same dispatch.
-      // alive = before − 1 (boss) + SplitCount (children).
-      Expect.equal
-        (aliveOf model)
-        (aliveBefore - 1 + BossAura.SplitCount)
-        "split children spawned"
-
-      Expect.isTrue
-        (AVal.getValue model.Waves.WaveActive)
-        "the split frame must not clear the wave"
-
-      // The boss paid its reward (kill) — children pay theirs on death.
-      // Wave 5 is tier 1: the reward is scaled ×1.2.
-      Expect.equal
-        (goldOf model)
-        (cfg.StartingGold + int(float EnemyDefs.boss.GoldReward * 1.2))
-        "boss reward paid"
-
-      // The wave eventually clears (children + pack leak; lives 20 ≥
-      // wave-5 count 15 + 3 children + boss... boss was killed, so
-      // 15 + 3 = 18 leaks ≤ 20 lives).
-      let cleared =
-        runner.StepUntil(
-          (fun m -> not(AVal.getValue m.Waves.WaveActive)),
-          TestData.dt,
-          4000
-        )
-
-      Expect.isTrue cleared "wave cleared after children leaked"
-      Expect.isFalse (AVal.getValue model.Economy.GameOver) "survived")
+        Expect.isTrue cleared "wave cleared after children leaked"
+        Expect.isFalse (AVal.getValue model.Economy.GameOver) "survived")
   ]

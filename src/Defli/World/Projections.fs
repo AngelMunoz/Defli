@@ -48,12 +48,11 @@ type Projections
     |> AMap.mapA(fun _ row ->
       enemies.Positions
       |> AMap.tryFind row.TargetEnemy
-      |> AVal.map(fun pos ->
-        {
-          Pos = row.Pos
-          TargetPos = pos |> ValueOption.defaultValue row.LastTargetPos
-          Sprite = row.ProjectileSprite
-        }))
+      |> AVal.map(fun pos -> {
+        Pos = row.Pos
+        TargetPos = pos |> ValueOption.defaultValue row.LastTargetPos
+        Sprite = row.ProjectileSprite
+      }))
 
   /// #12 Suppression (Phase 6) — per tower, is a live boss within
   /// BossAura.Radius of its cell? → the fire-rate factor (1 = free,
@@ -64,11 +63,12 @@ type Projections
   /// router passes the transient view; nothing is written back into
   /// a changeable map).
   member val Suppression: amap<int<TowerId>, float32> =
-    let cellSize = Vector2(float32 Tiles.TileSize, float32 Tiles.TileSize)
-
     towers.Statics
     |> AMap.mapA(fun _ s ->
-      let center = Cells.center s.Cell cellSize
+      let center =
+        Cells.center
+          s.Cell
+          (Vector2(float32 Tiles.TileSize, float32 Tiles.TileSize))
 
       enemies.BossPositions
       |> AMap.filter(fun _ bossPos ->
@@ -113,11 +113,8 @@ type Projections
           |> AMap.tryFind cellKey
           |> AVal.map3
             (fun gold def occupied ->
-              if ValueOption.isSome occupied then
-                PlacementStatus.Blocked
-              elif gold >= def.Cost then
-                PlacementStatus.Affordable
-              else
-                PlacementStatus.TooExpensive)
+              if ValueOption.isSome occupied then PlacementStatus.Blocked
+              elif gold >= def.Cost then PlacementStatus.Affordable
+              else PlacementStatus.TooExpensive)
             economy.Gold
             selected)

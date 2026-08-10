@@ -57,7 +57,9 @@ type TowersModel() =
 
 module Towers =
 
-  let private buildEffectiveDef(m: TowersModel) : amap<int<TowerId>, TowerDef> =
+  let inline private buildEffectiveDef
+    (m: TowersModel)
+    : amap<int<TowerId>, TowerDef> =
     m.Statics
     |> AMap.mapA(fun tid s ->
       m.Levels
@@ -92,9 +94,7 @@ module Towers =
       model, Array.empty
     | Upgrade tid ->
       let level =
-        model.Levels
-        |> CMap.tryGetValue tid
-        |> ValueOption.defaultValue 1
+        model.Levels |> CMap.tryGetValue tid |> ValueOption.defaultValue 1
 
       model.Levels |> CMap.addOrUpdate tid (level + 1)
       model, Array.empty
